@@ -46,6 +46,8 @@ export default function DriverLayout() {
         name="menurider"
         options={{
           href: null,
+          tabBarShowLabel: false,
+          tabBarStyle: { display: 'none' },
         }}
       />
     </Tabs>

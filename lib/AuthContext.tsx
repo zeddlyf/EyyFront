@@ -1,6 +1,6 @@
 import React, { createContext, useState, useContext, useEffect } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { auth } from './api';
+import { authAPI } from './api';
 
 interface AuthContextType {
   user: any;
@@ -35,7 +35,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const login = async (email: string, password: string) => {
     try {
-      const data = await auth.login(email, password);
+      const data = await authAPI.login(email, password);
       setUser(data.user);
     } catch (error) {
       throw error;
@@ -44,7 +44,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const register = async (userData: any) => {
     try {
-      const data = await auth.register(userData);
+      const data = await authAPI.register(userData);
       setUser(data.user);
     } catch (error) {
       throw error;
@@ -53,7 +53,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const logout = async () => {
     try {
-      await auth.logout();
+      await authAPI.logout();
       setUser(null);
     } catch (error) {
       throw error;

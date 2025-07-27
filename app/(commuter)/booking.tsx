@@ -724,9 +724,10 @@ const handleChooseDestination = async () => {
         </View>
       )}
 
-      <ScrollView contentContainerStyle={{ flexGrow: 1 }} keyboardShouldPersistTaps="handled">
-        {/* Map Content */}
-        <View style={styles.mapContainer}>
+      {/* Main Content - Half Map, Half Booking Info */}
+      <View style={styles.mainContent}>
+        {/* Map Section - Top Half */}
+        <View style={styles.mapSection}>
           {currentLocation && destination ? (
             <RouteMap
               origin={{
@@ -740,7 +741,7 @@ const handleChooseDestination = async () => {
                 address: destination.address || searchText || 'Selected Destination',
               }}
               onRouteReceived={setRouteInfo}
-              style={styles.map} // <-- Ensure map fills container
+              style={styles.map}
             />
           ) : (
             <MapView
@@ -766,86 +767,95 @@ const handleChooseDestination = async () => {
             </MapView>
           )}
         </View>
-        {/* Show waiting for driver message if ride is created */}
-        {waitingForDriver ? (
-          <View style={{ margin: 32, alignItems: 'center', justifyContent: 'center' }}>
-            <ActivityIndicator size="large" color="#0d4217" style={{ marginBottom: 16 }} />
-            <Text style={{ fontSize: 20, fontWeight: 'bold', color: '#0d4217', marginBottom: 8 }}>Waiting for driver...</Text>
-            <Text style={{ fontSize: 16, color: '#333', textAlign: 'center', marginBottom: 24 }}>Your ride request has been sent. Please wait while we connect you to a driver.</Text>
-            <TouchableOpacity
-              style={{
-                backgroundColor: '#e74c3c',
-                paddingVertical: 12,
-                paddingHorizontal: 32,
-                borderRadius: 25,
-                alignItems: 'center',
-                marginTop: 8,
-              }}
-              onPress={handleCancelRide}
-            >
-              <Text style={{ color: '#fff', fontSize: 16, fontWeight: 'bold' }}>Cancel</Text>
-            </TouchableOpacity>
-          </View>
-        ) : (
-          // Show route info and button below map
-          (routeInfo && routeInfo.legs && routeInfo.legs[0] && destination) ? (
-            <View style={{ marginHorizontal: 16, marginBottom: 16 }}>
-              <View style={styles.navigationInfo}>
-                <Text style={styles.turnInstruction}>Route Info</Text>
-                <View style={{ marginBottom: 4 }}>
-                  <Text style={styles.label}>From:</Text>
-                  <Text style={styles.address} numberOfLines={1} ellipsizeMode="tail">
-                    {currentLocation.address || 'Current Location'}
-                  </Text>
+
+        {/* Booking Info Section - Bottom Half */}
+        <View style={styles.bookingSection}>
+          {waitingForDriver ? (
+            <View style={styles.waitingContainer}>
+              <ActivityIndicator size="large" color="#0d4217" style={{ marginBottom: 16 }} />
+              <Text style={styles.waitingTitle}>Waiting for driver...</Text>
+              <Text style={styles.waitingSubtitle}>
+                Your ride request has been sent. Please wait while we connect you to a driver.
+              </Text>
+              <TouchableOpacity
+                style={styles.cancelButton}
+                onPress={handleCancelRide}
+              >
+                <Text style={styles.cancelButtonText}>Cancel Ride</Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
+            <View style={styles.bookingInfo}>
+              {/* Route Information */}
+              {routeInfo && routeInfo.legs && routeInfo.legs[0] && destination ? (
+                <View style={styles.routeInfo}>
+                  <Text style={styles.sectionTitle}>Route Information</Text>
+                  
+                  <View style={styles.locationInfo}>
+                    <View style={styles.locationItem}>
+                      <Ionicons name="location" size={16} color="#0d4217" />
+                      <View style={styles.locationText}>
+                        <Text style={styles.locationLabel}>From:</Text>
+                        <Text style={styles.locationAddress} numberOfLines={2} ellipsizeMode="tail">
+                          {currentLocation.address || 'Current Location'}
+                        </Text>
+                      </View>
+                    </View>
+                    
+                    <View style={styles.locationItem}>
+                      <Ionicons name="location" size={16} color="#e74c3c" />
+                      <View style={styles.locationText}>
+                        <Text style={styles.locationLabel}>To:</Text>
+                        <Text style={styles.locationAddress} numberOfLines={2} ellipsizeMode="tail">
+                          {destination.address || searchText || 'Selected Destination'}
+                        </Text>
+                      </View>
+                    </View>
+                  </View>
+
+                  <View style={styles.tripDetails}>
+                    <View style={styles.detailItem}>
+                      <Ionicons name="time-outline" size={16} color="#666" />
+                      <Text style={styles.detailText}>{routeInfo.legs[0].duration.text}</Text>
+                    </View>
+                    <View style={styles.detailItem}>
+                      <Ionicons name="navigate-outline" size={16} color="#666" />
+                      <Text style={styles.detailText}>{routeInfo.legs[0].distance.text}</Text>
+                    </View>
+                  </View>
+
+                  <View style={styles.fareContainer}>
+                    <Text style={styles.fareLabel}>Estimated Fare:</Text>
+                    <Text style={styles.fareAmount}>₱{calculateEstimatedFare(currentLocation, destination)}</Text>
+                  </View>
                 </View>
-                <View style={{ marginBottom: 4 }}>
-                  <Text style={styles.label}>To:</Text>
-                  <Text style={styles.address} numberOfLines={1} ellipsizeMode="tail">
-                    {destination.address || searchText || 'Selected Destination'}
-                  </Text>
+              ) : (
+                <View style={styles.noDestination}>
+                  <Ionicons name="search-outline" size={48} color="#ccc" />
+                  <Text style={styles.noDestinationText}>Search for a destination to see route information</Text>
                 </View>
-                <Text style={styles.distanceInfo}>
-                  {routeInfo.legs[0].distance.text} • {routeInfo.legs[0].duration.text}
-                </Text>
-                <Text style={styles.fareInfo}>
-                  Est. fare: <Text style={{ fontWeight: 'bold' }}>₱{calculateEstimatedFare(currentLocation, destination)}</Text>
-                </Text>
-              </View>
+              )}
+
+              {/* Book Ride Button */}
               <TouchableOpacity 
                 style={[
-                  styles.chooseButton, 
-                  (!destination || isLoading || isBooking) && styles.chooseButtonDisabled
+                  styles.bookButton, 
+                  (!destination || isLoading || isBooking) && styles.bookButtonDisabled
                 ]}
                 onPress={handleChooseDestination}
                 disabled={!destination || isLoading || isBooking}
               >
-                <Text style={styles.chooseButtonText}>
+                <Text style={styles.bookButtonText}>
                   {isBooking ? 'PROCESSING...' : 
                    isLoading ? 'LOADING...' : 
-                   destination ? 'CHOOSE THIS DESTINATION' : 
+                   destination ? 'BOOK RIDE' : 
                    'SELECT A DESTINATION'}
                 </Text>
               </TouchableOpacity>
             </View>
-          ) : (
-            <TouchableOpacity 
-              style={[
-                styles.chooseButton, 
-                (!destination || isLoading || isBooking) && styles.chooseButtonDisabled
-              ]}
-              onPress={handleChooseDestination}
-              disabled={!destination || isLoading || isBooking}
-            >
-              <Text style={styles.chooseButtonText}>
-                {isBooking ? 'PROCESSING...' : 
-                 isLoading ? 'LOADING...' : 
-                 destination ? 'CHOOSE THIS DESTINATION' : 
-                 'SELECT A DESTINATION'}
-              </Text>
-            </TouchableOpacity>
-          )
-        )}
-      </ScrollView>
+          )}
+        </View>
+      </View>
     </SafeAreaView>
   );
 }
@@ -882,12 +892,151 @@ const styles = StyleSheet.create({
     marginLeft: 8,
     color: '#000',
   },
-  mapContainer: {
+  mainContent: {
+    flex: 1,
+  },
+  mapSection: {
     flex: 1,
     position: 'relative',
   },
   map: {
     ...StyleSheet.absoluteFillObject,
+  },
+  bookingSection: {
+    flex: 1,
+    backgroundColor: '#fff',
+    paddingHorizontal: 16,
+    paddingTop: 16,
+    paddingBottom: 20,
+  },
+  waitingContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 20,
+  },
+  waitingTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#0d4217',
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  waitingSubtitle: {
+    fontSize: 16,
+    color: '#333',
+    textAlign: 'center',
+    marginBottom: 24,
+    lineHeight: 22,
+  },
+  cancelButton: {
+    backgroundColor: '#e74c3c',
+    paddingVertical: 12,
+    paddingHorizontal: 32,
+    borderRadius: 25,
+    alignItems: 'center',
+  },
+  cancelButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  bookingInfo: {
+    flex: 1,
+  },
+  routeInfo: {
+    flex: 1,
+  },
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#0d4217',
+    marginBottom: 16,
+  },
+  locationInfo: {
+    marginBottom: 20,
+  },
+  locationItem: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    marginBottom: 12,
+  },
+  locationText: {
+    flex: 1,
+    marginLeft: 8,
+  },
+  locationLabel: {
+    fontSize: 12,
+    color: '#666',
+    fontWeight: 'bold',
+    marginBottom: 2,
+  },
+  locationAddress: {
+    fontSize: 14,
+    color: '#333',
+    lineHeight: 18,
+  },
+  tripDetails: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 20,
+  },
+  detailItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  detailText: {
+    fontSize: 14,
+    color: '#666',
+    marginLeft: 4,
+  },
+  fareContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    backgroundColor: '#f8f9fa',
+    padding: 16,
+    borderRadius: 8,
+    marginBottom: 20,
+  },
+  fareLabel: {
+    fontSize: 16,
+    color: '#333',
+    fontWeight: '500',
+  },
+  fareAmount: {
+    fontSize: 20,
+    color: '#0d4217',
+    fontWeight: 'bold',
+  },
+  noDestination: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 20,
+  },
+  noDestinationText: {
+    fontSize: 16,
+    color: '#999',
+    textAlign: 'center',
+    marginTop: 12,
+    lineHeight: 22,
+  },
+  bookButton: {
+    backgroundColor: '#FFD700',
+    paddingVertical: 16,
+    borderRadius: 25,
+    alignItems: 'center',
+    marginTop: 'auto',
+  },
+  bookButtonDisabled: {
+    backgroundColor: '#ccc',
+  },
+  bookButtonText: {
+    color: '#0d4217',
+    fontSize: 16,
+    fontWeight: 'bold',
   },
   currentLocationMarker: {
     backgroundColor: 'white',
@@ -918,22 +1067,6 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.25,
     shadowRadius: 3.84,
     elevation: 5,
-  },
-  chooseButton: {
-    backgroundColor: '#FFD700',
-    paddingVertical: 16,
-    margin: 16,
-    borderRadius: 25,
-    alignItems: 'center',
-    marginBottom: 90,
-  },
-  chooseButtonDisabled: {
-    backgroundColor: '#ccc',
-  },
-  chooseButtonText: {
-    color: '#0d4217',
-    fontSize: 16,
-    fontWeight: 'bold',
   },
   bottomNav: {
     flexDirection: 'row',

@@ -46,6 +46,7 @@ export default function CommuterLayout() {
         name="booking"
         options={{
           href: null,
+          tabBarStyle: { display: 'none' },
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="book" size={size} color={color} />
           ),
@@ -56,6 +57,8 @@ export default function CommuterLayout() {
         name="menucommuter"
         options={{
           href: null,
+          tabBarShowLabel: false,
+          tabBarStyle: { display: 'none' }, 
         }}
       />
     </Tabs>

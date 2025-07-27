@@ -3,9 +3,11 @@ import { View, StyleSheet, Text, SafeAreaView, Platform, StatusBar, TouchableOpa
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { authAPI } from '../../lib/api';
+import { useAuth } from '../../lib/AuthContext';
 
 export default function MenuRider() {
   const router = useRouter();
+  const { user, logout } = useAuth();
   const [silentMode, setSilentMode] = useState(false);
   const [darkMode, setDarkMode] = useState(false);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
@@ -13,7 +15,7 @@ export default function MenuRider() {
   const handleSignOut = async () => {
     try {
       setIsLoggingOut(true);
-      await authAPI.logout();
+      await logout();
       router.replace('/');
     } catch (error) {
       console.error('Logout error:', error);
@@ -44,7 +46,7 @@ export default function MenuRider() {
             <View style={styles.avatarContainer}>
               <Ionicons name="person-circle" size={60} color="#fff" />
             </View>
-            <Text style={styles.name}>Claudia Alves</Text>
+            <Text style={styles.name}>{user?.fullName || 'User'}</Text>
             <Text style={styles.status}>Online</Text>
           </View>
 
@@ -54,7 +56,7 @@ export default function MenuRider() {
             <TouchableOpacity style={styles.menuItem}>
               <Ionicons name="person" size={20} color="#fff" />
               <View style={styles.menuItemContent}>
-                <Text style={styles.menuText}>@reallygreatstie</Text>
+                <Text style={styles.menuText}>{user?.email || 'No email'}</Text>
                 <Text style={styles.menuSubText}>Username</Text>
               </View>
               <Ionicons name="chevron-forward" size={20} color="#fff" style={styles.chevron} />
@@ -63,7 +65,7 @@ export default function MenuRider() {
             <TouchableOpacity style={styles.menuItem}>
               <Ionicons name="mail" size={20} color="#fff" />
               <View style={styles.menuItemContent}>
-                <Text style={styles.menuText}>hello@reallygreatstie.com</Text>
+                <Text style={styles.menuText}>{user?.email || 'No email'}</Text>
                 <Text style={styles.menuSubText}>E-mail Address</Text>
               </View>
               <Ionicons name="chevron-forward" size={20} color="#fff" style={styles.chevron} />
@@ -72,7 +74,7 @@ export default function MenuRider() {
             <TouchableOpacity style={styles.menuItem}>
               <Ionicons name="call" size={20} color="#fff" />
               <View style={styles.menuItemContent}>
-                <Text style={styles.menuText}>+123-456-7890</Text>
+                <Text style={styles.menuText}>{user?.phoneNumber || 'No phone number'}</Text>
                 <Text style={styles.menuSubText}>Phone Number</Text>
               </View>
               <Ionicons name="chevron-forward" size={20} color="#fff" style={styles.chevron} />
