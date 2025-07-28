@@ -39,6 +39,8 @@ interface RouteMapProps {
   showBuildings?: boolean;
   showIndoors?: boolean;
   mapType?: 'standard' | 'satellite' | 'hybrid';
+  useDijkstra?: boolean;
+  pathFinder?: any;
 }
 
 function RouteMap({ 
@@ -56,7 +58,9 @@ function RouteMap({
   showTraffic = true,
   showBuildings = true,
   showIndoors = true,
-  mapType = 'standard'
+  mapType = 'standard',
+  useDijkstra = false,
+  pathFinder = null
 }: RouteMapProps) {
   const mapRef = useRef<MapView>(null);
   const [route, setRoute] = useState<any>(null);
@@ -64,10 +68,54 @@ function RouteMap({
 
   useEffect(() => {
     if (origin && destination) {
-      fetchGoogleRoute();
+      if (useDijkstra && pathFinder) {
+        fetchDijkstraRoute();
+      } else {
+        fetchGoogleRoute();
+      }
       fitMapToMarkers();
     }
-  }, [origin, destination, travelMode]);
+  }, [origin, destination, travelMode, useDijkstra, pathFinder]);
+
+  const fetchDijkstraRoute = async () => {
+    try {
+      if (!pathFinder) {
+        console.error('PathFinder not provided for Dijkstra routing');
+        return;
+      }
+
+      // Find nearest nodes to origin and destination
+      const startNode = pathFinder.findNearestOsmNode({
+        latitude: origin.latitude,
+        longitude: origin.longitude
+      });
+      const endNode = pathFinder.findNearestOsmNode({
+        latitude: destination.latitude,
+        longitude: destination.longitude
+      });
+
+      if (!startNode || !endNode) {
+        console.error('Could not find route points on road network');
+        return;
+      }
+
+      // Calculate route using Dijkstra algorithm
+      const result = pathFinder.findShortestPath(startNode, endNode);
+
+      if (result && result.path && result.path.length > 0) {
+        // Convert path to coordinates
+        const coordinates = pathFinder.getDetailedPathCoordinates(result.path);
+        
+        setRoute(result);
+        setRouteCoordinates(coordinates);
+        onRouteReceived?.(result);
+      } else {
+        console.warn('No route found using Dijkstra algorithm');
+      }
+    } catch (error) {
+      console.error('Error fetching Dijkstra route:', error);
+    }
+  };
 
   const fetchGoogleRoute = async () => {
     try {

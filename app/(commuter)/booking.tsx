@@ -5,7 +5,7 @@ import { Link, useRouter, useLocalSearchParams } from 'expo-router';
 import MapView, { Marker, PROVIDER_GOOGLE, Polyline, PROVIDER_DEFAULT, MapType } from 'react-native-maps';
 import * as Location from 'expo-location';
 import { PathFinder, Point } from '../../utils/pathfinding';
-import { rideAPI } from '../../lib/api';
+import { rideAPI, walletAPI } from '../../lib/api';
 import { MaterialIcons } from '@expo/vector-icons';
 import { RouteMap } from '../../utils/RouteMap';
 // Removed: import { useSocket } from '../../lib/socket-context';
@@ -84,6 +84,8 @@ export default function LocationCommuter() {
   const [searchCache, setSearchCache] = useState<Record<string, Location>>({});
   const [searchError, setSearchError] = useState<string | null>(null);
   const [retryCount, setRetryCount] = useState(0);
+  const [mapTappedLocation, setMapTappedLocation] = useState<Location | null>(null);
+  const [showMapTapHint, setShowMapTapHint] = useState(true);
   const MAX_RETRIES = 3;
   const MAX_CACHE_SIZE = 50; // Maximum number of cached locations
   const CACHE_EXPIRY = 30 * 60 * 1000; // 30 minutes in milliseconds
@@ -114,6 +116,7 @@ export default function LocationCommuter() {
   const [acceptedRide, setAcceptedRide] = useState<any>(null);
   const [driverInfo, setDriverInfo] = useState<any>(null);
   const [isRideCompleted, setIsRideCompleted] = useState(false);
+  const [walletBalance, setWalletBalance] = useState<number | null>(null);
 
   // Add cache cleaning function
   const cleanCache = () => {
@@ -175,8 +178,8 @@ export default function LocationCommuter() {
       timestamp: Date.now(),
     };
 
-
     setDestination(newDestination);
+    setMapTappedLocation(null); // Clear map tapped location when searching
     updateMapRegion(newDestination);
 
     // No pathFinder logic here
@@ -385,6 +388,11 @@ const handleChooseDestination = async () => {
       throw new Error('Invalid fare calculation');
     }
 
+    // Check wallet balance
+    if (walletBalance !== null && walletBalance < estimatedFare) {
+      throw new Error(`Insufficient wallet balance. You need ₱${estimatedFare.toFixed(2)} but have ₱${walletBalance.toFixed(2)}`);
+    }
+
     // ✅ CLEAN rideData object — no extra keys inside GeoJSON
   const rideData = {
     pickupLocation: {
@@ -515,6 +523,7 @@ const handleChooseDestination = async () => {
   // Cleanup location subscription and reset booking states
   useEffect(() => {
     getCurrentLocation();
+    fetchWalletBalance();
     
     // Reset booking states when component mounts (for new bookings)
     setWaitingForDriver(false);
@@ -745,14 +754,29 @@ const handleChooseDestination = async () => {
             setDriverInfo(driverData);
           }
           
-          console.log('Ride completed:', currentRide);
-          Alert.alert(
-            'Ride Completed!', 
-            'Your ride has been completed. Thank you for using our service!',
-            [{ 
-              text: 'OK'
-            }]
-          );
+          // Deduct fare from wallet
+          try {
+            const rideFare = currentRide.fare || (currentLocation && destination ? calculateEstimatedFare(currentLocation, destination) : 0);
+            await deductFareFromWallet(rideFare);
+            
+            console.log('Ride completed and fare deducted:', currentRide);
+            Alert.alert(
+              'Ride Completed!', 
+              `Your ride has been completed. Fare of ₱${rideFare.toFixed(2)} has been deducted from your wallet.`,
+              [{ 
+                text: 'OK'
+              }]
+            );
+          } catch (error) {
+            console.error('Error deducting fare from wallet:', error);
+            Alert.alert(
+              'Ride Completed!', 
+              'Your ride has been completed. There was an issue with wallet deduction.',
+              [{ 
+                text: 'OK'
+              }]
+            );
+          }
         } else if (currentRide.status === 'cancelled') {
           setWaitingForDriver(false);
           Alert.alert(
@@ -788,6 +812,36 @@ const handleChooseDestination = async () => {
     }
   };
 
+  const handleMapTap = (event: any) => {
+    const { latitude, longitude } = event.nativeEvent.coordinate;
+    
+    // Check if tapped location is within Naga City
+    const tappedLocation: Location = {
+      latitude,
+      longitude,
+      address: `Tapped Location (${latitude.toFixed(6)}, ${longitude.toFixed(6)})`,
+      timestamp: Date.now(),
+    };
+
+    if (isWithinNagaCity(tappedLocation)) {
+      setMapTappedLocation(tappedLocation);
+      setDestination(tappedLocation);
+      setSearchText(`Tapped Location (${latitude.toFixed(6)}, ${longitude.toFixed(6)})`);
+      setShowMapTapHint(false);
+      
+      // Update map region to show the tapped location
+      updateMapRegion(tappedLocation);
+      
+      console.log('Map tapped at:', latitude, longitude);
+    } else {
+      Alert.alert(
+        'Location Outside Service Area',
+        'Please select a location within Naga City for our service.',
+        [{ text: 'OK' }]
+      );
+    }
+  };
+
   const handleRideCompletion = () => {
     // Reset all booking states
     setWaitingForDriver(false);
@@ -797,11 +851,13 @@ const handleChooseDestination = async () => {
     setRideStatus('pending');
     setSearchText('');
     setDestination(null);
+    setMapTappedLocation(null);
     setRouteInfo(null);
     setSearchError(null);
     setFare(0);
     setTotalDistance(0);
     setIsBooking(false);
+    setShowMapTapHint(true);
     
     // Navigate back to dashboard after completion
     router.replace('/dashboardcommuter');
@@ -838,6 +894,44 @@ const handleChooseDestination = async () => {
     }
   };
 
+  const fetchWalletBalance = async () => {
+    try {
+      const wallets = await walletAPI.getWallets();
+      const wallet = Array.isArray(wallets) ? wallets[0] : wallets;
+      setWalletBalance(wallet?.amount ?? 0);
+    } catch (error) {
+      console.error('Error fetching wallet balance:', error);
+      setWalletBalance(0);
+    }
+  };
+
+  const deductFareFromWallet = async (fare: number) => {
+    try {
+      const wallets = await walletAPI.getWallets();
+      const wallet = Array.isArray(wallets) ? wallets[0] : wallets;
+      
+      if (!wallet || !wallet._id) {
+        throw new Error('Wallet not found');
+      }
+
+      const currentBalance = wallet.amount || 0;
+      if (currentBalance < fare) {
+        throw new Error('Insufficient wallet balance');
+      }
+
+      const newBalance = currentBalance - fare;
+      await walletAPI.updateWallet(wallet._id, { amount: newBalance });
+      
+      // Update local state
+      setWalletBalance(newBalance);
+      
+      console.log(`Fare of ₱${fare.toFixed(2)} deducted from wallet. New balance: ₱${newBalance.toFixed(2)}`);
+    } catch (error) {
+      console.error('Error deducting fare from wallet:', error);
+      throw error;
+    }
+  };
+
   const resetBookingForm = () => {
     // Reset all booking-related states for a new booking
     setWaitingForDriver(false);
@@ -870,9 +964,23 @@ const handleChooseDestination = async () => {
             value={searchText}
             onChangeText={debouncedSearch}
             returnKeyType="search"
+            editable={!mapTappedLocation} // Disable editing when location is selected via map tap
           />
           {isLoading && (
             <ActivityIndicator size="small" color="#0d4217" style={styles.searchLoading} />
+          )}
+          {mapTappedLocation && (
+            <TouchableOpacity
+              onPress={() => {
+                setMapTappedLocation(null);
+                setDestination(null);
+                setSearchText('');
+                setShowMapTapHint(true);
+              }}
+              style={styles.clearButton}
+            >
+              <Ionicons name="close-circle" size={20} color="#0d4217" />
+            </TouchableOpacity>
           )}
         </View>
       </View>
@@ -913,6 +1021,7 @@ const handleChooseDestination = async () => {
               showsMyLocationButton={true}
               mapType={mapStyle as MapType}
               showsTraffic={showTraffic}
+              onPress={handleMapTap}
             >
               {currentLocation && (
                 <Marker
@@ -924,7 +1033,28 @@ const handleChooseDestination = async () => {
                   pinColor="green"
                 />
               )}
+              
+              {mapTappedLocation && (
+                <Marker
+                  coordinate={{
+                    latitude: mapTappedLocation.latitude,
+                    longitude: mapTappedLocation.longitude,
+                  }}
+                  title="Selected Destination"
+                  pinColor="red"
+                />
+              )}
             </MapView>
+          )}
+          
+          {/* Map Tap Hint Overlay */}
+          {showMapTapHint && !destination && (
+            <View style={styles.mapTapHint}>
+              <View style={styles.hintContainer}>
+                <Ionicons name="hand-left" size={24} color="#fff" />
+                <Text style={styles.hintText}>Tap anywhere on the map to set destination</Text>
+              </View>
+            </View>
           )}
         </View>
 
@@ -1096,6 +1226,17 @@ const handleChooseDestination = async () => {
             </ScrollView>
           ) : (
             <View style={styles.bookingInfo}>
+              {/* Wallet Balance */}
+              <View style={styles.walletInfo}>
+                <View style={styles.walletRow}>
+                  <Ionicons name="wallet" size={16} color="#0d4217" />
+                  <Text style={styles.walletLabel}>Wallet Balance:</Text>
+                  <Text style={styles.walletAmount}>
+                    ₱{walletBalance !== null ? walletBalance.toFixed(2) : '...'}
+                  </Text>
+                </View>
+              </View>
+
               {/* Route Information */}
               {routeInfo && routeInfo.legs && routeInfo.legs[0] && destination ? (
                 <View style={styles.routeInfo}>
@@ -1718,5 +1859,53 @@ const styles = StyleSheet.create({
     color: '#333',
     fontWeight: '600',
     flex: 1,
+  },
+  mapTapHint: {
+    position: 'absolute',
+    top: '50%',
+    left: 20,
+    right: 20,
+    transform: [{ translateY: -25 }],
+    zIndex: 1000,
+  },
+  hintContainer: {
+    backgroundColor: 'rgba(13, 66, 23, 0.9)',
+    borderRadius: 12,
+    padding: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  hintText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
+    textAlign: 'center',
+  },
+  clearButton: {
+    padding: 4,
+    marginLeft: 8,
+  },
+  walletInfo: {
+    backgroundColor: '#f8f9fa',
+    padding: 12,
+    borderRadius: 8,
+    marginBottom: 16,
+  },
+  walletRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  walletLabel: {
+    fontSize: 14,
+    color: '#666',
+    fontWeight: '500',
+  },
+  walletAmount: {
+    fontSize: 16,
+    color: '#0d4217',
+    fontWeight: 'bold',
   },
 }); 

@@ -59,6 +59,120 @@ export default function ProfileCommuter() {
     }
   };
 
+  // Helper functions for transaction display
+  const getTransactionIcon = (type: string) => {
+    switch (type?.toLowerCase()) {
+      case 'deposit':
+      case 'credit':
+        return 'add-circle';
+      case 'withdrawal':
+      case 'debit':
+        return 'remove-circle';
+      case 'payment':
+      case 'ride':
+        return 'car';
+      case 'refund':
+        return 'refresh-circle';
+      default:
+        return 'card';
+    }
+  };
+
+  const getTransactionColor = (type: string) => {
+    switch (type?.toLowerCase()) {
+      case 'deposit':
+      case 'credit':
+        return '#4CAF50';
+      case 'withdrawal':
+      case 'debit':
+        return '#f44336';
+      case 'payment':
+      case 'ride':
+        return '#FF9800';
+      case 'refund':
+        return '#2196F3';
+      default:
+        return '#FFD700';
+    }
+  };
+
+  const getTransactionTitle = (title: string) => {
+    if (title?.toLowerCase().includes('ride')) return 'Ride Payment';
+    if (title?.toLowerCase().includes('deposit')) return 'Wallet Deposit';
+    if (title?.toLowerCase().includes('withdrawal')) return 'Withdrawal';
+    if (title?.toLowerCase().includes('refund')) return 'Refund';
+    return title || 'Transaction';
+  };
+
+  const getAmountColor = (type: string) => {
+    switch (type?.toLowerCase()) {
+      case 'deposit':
+      case 'credit':
+      case 'refund':
+        return '#4CAF50';
+      case 'withdrawal':
+      case 'debit':
+      case 'payment':
+      case 'ride':
+        return '#f44336';
+      default:
+        return '#FFD700';
+    }
+  };
+
+  const getStatusColor = (status: string) => {
+    switch (status?.toLowerCase()) {
+      case 'success':
+      case 'completed':
+        return '#4CAF50';
+      case 'pending':
+        return '#FF9800';
+      case 'failed':
+      case 'cancelled':
+        return '#f44336';
+      default:
+        return '#666';
+    }
+  };
+
+  const getStatusText = (status: string) => {
+    switch (status?.toLowerCase()) {
+      case 'success':
+      case 'completed':
+        return 'Success';
+      case 'pending':
+        return 'Pending';
+      case 'failed':
+        return 'Failed';
+      case 'cancelled':
+        return 'Cancelled';
+      default:
+        return 'Success';
+    }
+  };
+
+  const formatTransactionDate = (dateString: string) => {
+    const date = new Date(dateString);
+    const now = new Date();
+    const diffInHours = (now.getTime() - date.getTime()) / (1000 * 60 * 60);
+    
+    if (diffInHours < 1) {
+      return 'Just now';
+    } else if (diffInHours < 24) {
+      return `${Math.floor(diffInHours)} hours ago`;
+    } else if (diffInHours < 48) {
+      return 'Yesterday';
+    } else {
+      return date.toLocaleDateString('en-US', {
+        month: 'short',
+        day: 'numeric',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+      });
+    }
+  };
+
   return (
     <SafeAreaView style={styles.container}>
       {/* Header */}
@@ -115,26 +229,98 @@ export default function ProfileCommuter() {
 
         {/* Transaction History */}
         <View style={styles.transactionSection}>
-          <Text style={styles.sectionTitle}>Transaction</Text>
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>Transaction History</Text>
+            <TouchableOpacity style={styles.refreshButton} onPress={() => {
+              // Refresh transactions
+              const fetchWalletAndTransactions = async () => {
+                setLoading(true);
+                setError(null);
+                try {
+                  const wallets = await walletAPI.getWallets();
+                  const wallet = Array.isArray(wallets) ? wallets[0] : wallets;
+                  setBalance(wallet?.amount ?? 0);
+                  setWalletId(wallet?._id ?? null);
+                  const payments = await paymentAPI.getPayments();
+                  setTransactions(Array.isArray(payments) ? payments : []);
+                } catch (err: any) {
+                  setError(err.message || 'Failed to load wallet info');
+                } finally {
+                  setLoading(false);
+                }
+              };
+              fetchWalletAndTransactions();
+            }}>
+              <Ionicons name="refresh" size={20} color="#FFD700" />
+            </TouchableOpacity>
+          </View>
+          
           {loading ? (
-            <Text style={{ color: '#fff', marginTop: 16 }}>Loading...</Text>
+            <View style={styles.loadingContainer}>
+              <Ionicons name="reload" size={24} color="#FFD700" />
+              <Text style={styles.loadingText}>Loading transactions...</Text>
+            </View>
           ) : error ? (
-            <Text style={{ color: 'red', marginTop: 16 }}>{error}</Text>
+            <View style={styles.errorContainer}>
+              <Ionicons name="alert-circle" size={24} color="#ff6b6b" />
+              <Text style={styles.errorText}>{error}</Text>
+            </View>
           ) : (
             <View style={styles.transactionList}>
               {transactions.length === 0 ? (
-                <Text style={{ color: '#fff', opacity: 0.7 }}>No transactions found.</Text>
+                <View style={styles.emptyContainer}>
+                  <Ionicons name="receipt-outline" size={48} color="#ffffff40" />
+                  <Text style={styles.emptyText}>No transactions found</Text>
+                  <Text style={styles.emptySubtext}>Your transaction history will appear here</Text>
+                </View>
               ) : (
                 transactions.map((tx, idx) => (
-                  <View style={styles.transactionItem} key={tx._id || idx}>
-                    <View style={styles.transactionInfo}>
-                      <Text style={styles.transactionTitle}>{tx.description || tx.reference || 'Payment'}</Text>
-                      <Text style={styles.transactionDate}>{tx.createdAt ? new Date(tx.createdAt).toLocaleString() : ''}</Text>
+                  <View style={styles.transactionCard} key={tx._id || idx}>
+                    <View style={styles.transactionHeader}>
+                      <View style={styles.transactionIcon}>
+                        <Ionicons 
+                          name={getTransactionIcon(tx.type || tx.status)} 
+                          size={20} 
+                          color={getTransactionColor(tx.type || tx.status)} 
+                        />
+                      </View>
+                      <View style={styles.transactionInfo}>
+                        <Text style={styles.transactionTitle}>
+                          {getTransactionTitle(tx.description || tx.reference || tx.type || 'Payment')}
+                        </Text>
+                        <Text style={styles.transactionDate}>
+                          {tx.createdAt ? formatTransactionDate(tx.createdAt) : 'Unknown date'}
+                        </Text>
+                      </View>
+                      <View style={styles.transactionAmount}>
+                        <Text style={[
+                          styles.amount,
+                          { color: getAmountColor(tx.type || tx.status) }
+                        ]}>
+                          {tx.amount ? `${tx.amount > 0 ? '+' : ''}₱${tx.amount.toFixed(2)}` : '₱0.00'}
+                        </Text>
+                        <View style={[
+                          styles.statusBadge,
+                          { backgroundColor: getStatusColor(tx.status || 'success') }
+                        ]}>
+                          <Text style={styles.statusText}>
+                            {getStatusText(tx.status || 'success')}
+                          </Text>
+                        </View>
+                      </View>
                     </View>
-                    <View style={styles.transactionAmount}>
-                      <Text style={styles.amount}>{tx.amount ? `${tx.amount.toFixed(2)} php` : ''}</Text>
-                      <Text style={styles.status}>{tx.status || 'Success'}</Text>
-                    </View>
+                    
+                    {tx.description && tx.description !== tx.reference && (
+                      <Text style={styles.transactionDescription}>
+                        {tx.description}
+                      </Text>
+                    )}
+                    
+                    {tx.reference && (
+                      <Text style={styles.transactionReference}>
+                        Ref: {tx.reference}
+                      </Text>
+                    )}
                   </View>
                 ))
               )}
@@ -219,14 +405,77 @@ const styles = StyleSheet.create({
   transactionSection: {
     flex: 1,
   },
+  sectionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
   sectionTitle: {
     color: '#fff',
     fontSize: 18,
     fontWeight: 'bold',
-    marginBottom: 16,
+  },
+  refreshButton: {
+    padding: 8,
   },
   transactionList: {
     gap: 16,
+  },
+  loadingContainer: {
+    alignItems: 'center',
+    paddingVertical: 32,
+  },
+  loadingText: {
+    color: '#FFD700',
+    fontSize: 16,
+    marginTop: 8,
+  },
+  errorContainer: {
+    alignItems: 'center',
+    paddingVertical: 32,
+  },
+  errorText: {
+    color: '#ff6b6b',
+    fontSize: 16,
+    marginTop: 8,
+    textAlign: 'center',
+  },
+  emptyContainer: {
+    alignItems: 'center',
+    paddingVertical: 48,
+  },
+  emptyText: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginTop: 16,
+  },
+  emptySubtext: {
+    color: '#ffffff80',
+    fontSize: 14,
+    marginTop: 8,
+    textAlign: 'center',
+  },
+  transactionCard: {
+    backgroundColor: '#ffffff10',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 12,
+  },
+  transactionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  transactionIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#ffffff20',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
   },
   transactionItem: {
     flexDirection: 'row',
@@ -262,6 +511,28 @@ const styles = StyleSheet.create({
   status: {
     color: '#4CAF50',
     fontSize: 12,
+  },
+  statusBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+    marginTop: 4,
+  },
+  statusText: {
+    color: '#fff',
+    fontSize: 10,
+    fontWeight: 'bold',
+  },
+  transactionDescription: {
+    color: '#ffffff80',
+    fontSize: 14,
+    marginTop: 8,
+    fontStyle: 'italic',
+  },
+  transactionReference: {
+    color: '#ffffff60',
+    fontSize: 12,
+    marginTop: 4,
   },
   bottomNav: {
     flexDirection: 'row',
