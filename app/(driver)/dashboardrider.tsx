@@ -7,6 +7,8 @@ import * as Location from 'expo-location';
 import { rideAPI } from '../../lib/api';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { GOOGLE_MAPS_ENDPOINTS, buildGoogleMapsUrl, TRAVEL_MODES } from '../../lib/google-maps-config';
+import { RouteMap } from '../../utils/RouteMap';
+import { PathFinder, Point } from '../../utils/pathfinding';
 
 interface Location {
   latitude: number;
@@ -15,7 +17,8 @@ interface Location {
 }
 
 interface RideRequest {
-  id: string;
+  _id?: string; // MongoDB ObjectId
+  id?: string; // Alternative ID field
   pickupLocation: {
     type: string;
     coordinates: [number, number];
@@ -47,6 +50,7 @@ interface RouteInfo {
     distance: { text: string; value: number };
     duration: { text: string; value: number };
   }>;
+  navigationStatus?: 'navigating_to_pickup' | 'navigating_to_destination' | 'completed';
 }
 
 export default function DashboardRider() {
@@ -71,6 +75,24 @@ export default function DashboardRider() {
     latitudeDelta: 0.0922,
     longitudeDelta: 0.0421,
   });
+  const [pathFinder, setPathFinder] = useState<PathFinder | null>(null);
+  const [isPathFinderInitialized, setIsPathFinderInitialized] = useState(false);
+  const [navigationMode, setNavigationMode] = useState<'google' | 'pathfinder'>('google');
+
+  const initializePathFinder = async (location: Location) => {
+    try {
+      console.log('Initializing PathFinder...');
+      const newPathFinder = new PathFinder();
+      await newPathFinder.fetchRoadNetwork(location, 2000); // 2km radius
+      setPathFinder(newPathFinder);
+      setIsPathFinderInitialized(true);
+      console.log('PathFinder initialized successfully');
+    } catch (error) {
+      console.error('Error initializing PathFinder:', error);
+      // Fallback to Google Maps
+      setNavigationMode('google');
+    }
+  };
 
   const getCurrentLocation = async () => {
     try {
@@ -102,6 +124,9 @@ export default function DashboardRider() {
       setRegion(newRegion);
       
       mapRef.current?.animateToRegion(newRegion, 1000);
+      
+      // Initialize PathFinder with current location
+      await initializePathFinder(newLocation);
     } catch (error) {
       console.error('Error getting location:', error);
       Alert.alert('Error', 'Failed to get your current location. Please try again.');
@@ -111,6 +136,79 @@ export default function DashboardRider() {
   };
 
   const fetchRoute = async (origin: Location, destination: Location) => {
+    try {
+      // Try PathFinder first if available
+      if (pathFinder && isPathFinderInitialized && navigationMode === 'pathfinder') {
+        await fetchPathFinderRoute(origin, destination);
+      } else {
+        // Fallback to Google Maps
+        await fetchGoogleRoute(origin, destination);
+      }
+    } catch (error) {
+      console.error('Error fetching route:', error);
+      // Fallback to Google Maps if PathFinder fails
+      if (navigationMode === 'pathfinder') {
+        setNavigationMode('google');
+        await fetchGoogleRoute(origin, destination);
+      }
+    }
+  };
+
+  const fetchPathFinderRoute = async (origin: Location, destination: Location) => {
+    if (!pathFinder) return;
+
+    try {
+      console.log('Using PathFinder for route calculation...');
+      
+      // Find nearest nodes to origin and destination
+      const originPoint: Point = { latitude: origin.latitude, longitude: origin.longitude };
+      const destinationPoint: Point = { latitude: destination.latitude, longitude: destination.longitude };
+      
+      const startNodeId = pathFinder.findNearestOsmNode(originPoint);
+      const endNodeId = pathFinder.findNearestOsmNode(destinationPoint);
+      
+      if (!startNodeId || !endNodeId) {
+        throw new Error('Could not find nearest nodes for route calculation');
+      }
+      
+      console.log('Found nodes:', { startNodeId, endNodeId });
+      
+      // Find shortest path
+      const pathResult = pathFinder.findShortestPath(startNodeId, endNodeId);
+      
+      if (pathResult) {
+        const coordinates = pathFinder.getPathCoordinates(pathResult.path);
+        setRouteCoordinates(coordinates);
+        setRouteInfo({
+          distance: { text: `${(pathResult.distance / 1000).toFixed(1)} km`, value: pathResult.distance },
+          duration: { text: `${Math.round(pathResult.estimatedTime)} min`, value: pathResult.estimatedTime * 60 },
+          polyline: { points: '' },
+          steps: [],
+          legs: [{
+            distance: { text: `${(pathResult.distance / 1000).toFixed(1)} km`, value: pathResult.distance },
+            duration: { text: `${Math.round(pathResult.estimatedTime)} min`, value: pathResult.estimatedTime * 60 }
+          }]
+        });
+        
+        // Fit map to show the entire route
+        if (mapRef.current && coordinates.length > 0) {
+          mapRef.current.fitToCoordinates(coordinates, {
+            edgePadding: { top: 50, right: 50, bottom: 50, left: 50 },
+            animated: true,
+          });
+        }
+        
+        console.log('PathFinder route calculated:', pathResult);
+      } else {
+        throw new Error('No path found');
+      }
+    } catch (error) {
+      console.error('PathFinder route calculation failed:', error);
+      throw error;
+    }
+  };
+
+  const fetchGoogleRoute = async (origin: Location, destination: Location) => {
     try {
       const originStr = `${origin.latitude},${origin.longitude}`;
       const destinationStr = `${destination.latitude},${destination.longitude}`;
@@ -143,7 +241,8 @@ export default function DashboardRider() {
         }
       }
     } catch (error) {
-      console.error('Error fetching route:', error);
+      console.error('Error fetching Google route:', error);
+      throw error;
     }
   };
 
@@ -187,13 +286,22 @@ export default function DashboardRider() {
 
   const fetchRideRequests = async () => {
     try {
-      const response = await rideAPI.getMyRides();
+      // Use getNearbyRides to get available ride requests for drivers
+      const response = await rideAPI.getNearbyRides(
+        currentLocation.latitude,
+        currentLocation.longitude,
+        10000 // 10km radius
+      );
+      console.log('Raw response from getNearbyRides:', response);
       // Filter for pending ride requests
       const pendingRides = response.filter((ride: RideRequest) => 
         ride.status === 'pending' || ride.status === 'waiting'
       );
+      console.log('Filtered pending rides:', pendingRides);
+      console.log('Sample ride object:', pendingRides[0]);
       setRideRequests(pendingRides);
       console.log('Fetched ride requests:', pendingRides.length);
+      console.log('Available rides:', pendingRides);
     } catch (error: any) {
       if (error.message && error.message.toLowerCase().includes('authenticate')) {
         Alert.alert('Session expired', 'Please log in again.');
@@ -206,11 +314,19 @@ export default function DashboardRider() {
 
   const acceptRide = async (rideId: string) => {
     try {
-      await rideAPI.updateRideStatus(rideId, 'accepted');
+      console.log('Accepting ride with ID:', rideId);
+      console.log('Ride ID type:', typeof rideId);
+      
+      if (!rideId || rideId === '') {
+        Alert.alert('Error', 'Invalid ride ID. Please try again.');
+        return;
+      }
+      
+      await rideAPI.acceptRide(rideId);
       Alert.alert('Success', 'Ride accepted! Navigate to pickup location.');
       
       // Find the accepted ride
-      const acceptedRideData = rideRequests.find(ride => ride.id === rideId);
+      const acceptedRideData = rideRequests.find(ride => (ride._id || ride.id) === rideId);
       if (acceptedRideData) {
         setAcceptedRide(acceptedRideData);
         setIsNavigating(true);
@@ -238,6 +354,8 @@ export default function DashboardRider() {
     if (!acceptedRide) return;
     
     try {
+      console.log('Starting navigation to destination...');
+      
       // Fetch route to destination
       const destinationLocation: Location = {
         latitude: acceptedRide.dropoffLocation.coordinates[1],
@@ -246,8 +364,24 @@ export default function DashboardRider() {
       };
       
       await fetchRoute(currentLocation, destinationLocation);
+      
+      // Update navigation state to indicate we're navigating to destination
+      if (routeInfo) {
+        setRouteInfo({
+          ...routeInfo,
+          navigationStatus: 'navigating_to_destination'
+        });
+      }
+      
+      Alert.alert(
+        'Navigation Started', 
+        'You are now navigating to the destination. Follow the route and complete the ride when you arrive.',
+        [{ text: 'OK' }]
+      );
+      
     } catch (error) {
       console.error('Error starting navigation:', error);
+      Alert.alert('Navigation Error', 'Failed to start navigation. Please try again.');
     }
   };
 
@@ -255,7 +389,7 @@ export default function DashboardRider() {
     if (!acceptedRide) return;
     
     try {
-      await rideAPI.updateRideStatus(acceptedRide.id, 'completed');
+      await rideAPI.updateRideStatus(acceptedRide._id || acceptedRide.id || '', 'completed');
       Alert.alert('Success', 'Ride completed!');
       
       // Reset navigation state
@@ -281,6 +415,34 @@ export default function DashboardRider() {
       // When becoming unavailable, clear ride requests
       setRideRequests([]);
     }
+  };
+
+  const handleNavigationModeChange = (mode: 'google' | 'pathfinder') => {
+    setNavigationMode(mode);
+    
+    // Recalculate route if currently navigating
+    if (isNavigating && acceptedRide) {
+      const destinationLocation: Location = {
+        latitude: acceptedRide.dropoffLocation.coordinates[1],
+        longitude: acceptedRide.dropoffLocation.coordinates[0],
+        address: acceptedRide.dropoffLocation.address,
+      };
+      
+      fetchRoute(currentLocation, destinationLocation);
+    }
+  };
+
+  const getRideRequestMarkers = () => {
+    return rideRequests.map((ride) => ({
+      coordinate: {
+        latitude: ride.pickupLocation.coordinates[1],
+        longitude: ride.pickupLocation.coordinates[0],
+      },
+      title: "Ride Request",
+      description: `₱${ride.fare.toFixed(2)} • ${(ride.distance / 1000).toFixed(1)}km`,
+      pinColor: "#FF6B35",
+      onPress: () => setSelectedRide(ride)
+    }));
   };
 
   const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
@@ -318,7 +480,7 @@ export default function DashboardRider() {
       const interval = setInterval(fetchRideRequests, 10000); // Fetch every 10 seconds
       return () => clearInterval(interval);
     }
-  }, [isAvailable, isNavigating]);
+  }, [isAvailable, isNavigating, currentLocation.latitude, currentLocation.longitude]);
 
   return (
     <SafeAreaView style={styles.container}>
@@ -349,81 +511,62 @@ export default function DashboardRider() {
       <View style={styles.content}>
         {/* Top Half - Map */}
         <View style={styles.mapContainer}>
-          <MapView
-            ref={mapRef}
-            provider={PROVIDER_GOOGLE}
-            style={styles.map}
-            initialRegion={region}
-            onRegionChangeComplete={setRegion}
-            showsUserLocation={true}
-            showsMyLocationButton={false}
-            showsCompass={true}
-            showsScale={true}
-          >
-            {/* Current Location Marker */}
-            <Marker
-              coordinate={currentLocation}
-              title="Your Location"
-              description={locationAccuracy ? `Accuracy: ${Math.round(locationAccuracy)}m` : undefined}
-            >
-              <View style={styles.currentLocationMarker}>
-                <Ionicons name="location" size={30} color="#0d4217" />
-              </View>
-            </Marker>
-
-            {/* Ride Request Markers */}
-            {!isNavigating && rideRequests.map((ride) => (
-              <Marker
-                key={ride.id}
-                coordinate={{
-                  latitude: ride.pickupLocation.coordinates[1],
-                  longitude: ride.pickupLocation.coordinates[0],
-                }}
-                title="Ride Request"
-                description={`₱${ride.fare.toFixed(2)} • ${(ride.distance / 1000).toFixed(1)}km`}
-                onPress={() => setSelectedRide(ride)}
-              >
-                <View style={styles.rideRequestMarker}>
-                  <Ionicons name="car" size={24} color="#FF6B35" />
-                </View>
-              </Marker>
-            ))}
-
-            {/* Accepted Ride Markers */}
-            {isNavigating && acceptedRide && (
-              <>
-                <Marker
-                  coordinate={{
+          {isNavigating && acceptedRide ? (
+            // Use RouteMap for navigation
+            <RouteMap
+              origin={{
+                latitude: currentLocation.latitude,
+                longitude: currentLocation.longitude,
+                address: "Your Location"
+              }}
+              destination={{
+                latitude: acceptedRide.dropoffLocation.coordinates[1],
+                longitude: acceptedRide.dropoffLocation.coordinates[0],
+                address: acceptedRide.dropoffLocation.address
+              }}
+              travelMode={TRAVEL_MODES.DRIVING}
+              showRouteInfo={true}
+              onRouteReceived={(route) => {
+                console.log('Route received from RouteMap:', route);
+                setRouteInfo(route);
+              }}
+              style={styles.map}
+              showMyLocationButton={false}
+              additionalMarkers={[
+                {
+                  coordinate: {
                     latitude: acceptedRide.pickupLocation.coordinates[1],
                     longitude: acceptedRide.pickupLocation.coordinates[0],
-                  }}
-                  title="Pickup Location"
-                  description={acceptedRide.pickupLocation.address}
-                  pinColor="#FF6B35"
-                />
-                <Marker
-                  coordinate={{
-                    latitude: acceptedRide.dropoffLocation.coordinates[1],
-                    longitude: acceptedRide.dropoffLocation.coordinates[0],
-                  }}
-                  title="Destination"
-                  description={acceptedRide.dropoffLocation.address}
-                  pinColor="#e74c3c"
-                />
-              </>
-            )}
-
-            {/* Route Polyline */}
-            {routeCoordinates.length > 0 && (
-              <Polyline
-                coordinates={routeCoordinates}
-                strokeColor="#007AFF"
-                strokeWidth={4}
-                lineDashPattern={[1]}
-                geodesic={true}
-              />
-            )}
-          </MapView>
+                  },
+                  title: "Pickup Location",
+                  description: acceptedRide.pickupLocation.address,
+                  pinColor: "#FF6B35"
+                }
+              ]}
+            />
+          ) : (
+            // Use RouteMap for ride requests view
+            <RouteMap
+              origin={{
+                latitude: currentLocation.latitude,
+                longitude: currentLocation.longitude,
+                address: "Your Location"
+              }}
+              destination={{
+                latitude: currentLocation.latitude,
+                longitude: currentLocation.longitude,
+                address: "Your Location"
+              }}
+              travelMode={TRAVEL_MODES.DRIVING}
+              showRouteInfo={false}
+              style={styles.map}
+              showMyLocationButton={false}
+              showTraffic={false}
+              showBuildings={false}
+              showIndoors={false}
+              additionalMarkers={getRideRequestMarkers()}
+            />
+          )}
 
           {/* Recenter Button */}
           <TouchableOpacity 
@@ -443,7 +586,19 @@ export default function DashboardRider() {
           {/* Navigation Info */}
           {isNavigating && routeInfo && (
             <View style={styles.navigationInfo}>
-              <Text style={styles.navigationTitle}>Navigation Active</Text>
+              <View style={styles.navigationHeader}>
+                <Text style={styles.navigationTitle}>Navigation Active</Text>
+                <View style={styles.navigationModeBadge}>
+                  <Ionicons 
+                    name={navigationMode === 'pathfinder' ? 'map' : 'logo-google'} 
+                    size={12} 
+                    color="#fff" 
+                  />
+                  <Text style={styles.navigationModeText}>
+                    {navigationMode === 'pathfinder' ? 'PathFinder' : 'Google Maps'}
+                  </Text>
+                </View>
+              </View>
               <Text style={styles.routeInfo}>
                 {routeInfo.legs?.[0]?.distance?.text} • {routeInfo.legs?.[0]?.duration?.text}
               </Text>
@@ -505,6 +660,35 @@ export default function DashboardRider() {
                       <Text style={styles.completeButtonText}>Complete Ride</Text>
                     </TouchableOpacity>
                   </View>
+                  
+                  <View style={styles.navigationModeContainer}>
+                    <Text style={styles.navigationModeLabel}>Navigation Mode:</Text>
+                    {navigationMode === 'pathfinder' && !isPathFinderInitialized && (
+                      <View style={styles.pathfinderStatus}>
+                        <ActivityIndicator size="small" color="#FF6B35" />
+                        <Text style={styles.pathfinderStatusText}>Initializing PathFinder...</Text>
+                      </View>
+                    )}
+                    <TouchableOpacity
+                      style={[styles.modeButton, navigationMode === 'google' && styles.modeButtonActive]}
+                      onPress={() => handleNavigationModeChange('google')}
+                    >
+                      <Ionicons name="logo-google" size={16} color={navigationMode === 'google' ? '#fff' : '#666'} />
+                      <Text style={[styles.modeButtonText, navigationMode === 'google' && styles.modeButtonTextActive]}>
+                        Google Maps
+                      </Text>
+                    </TouchableOpacity>
+                    
+                    <TouchableOpacity
+                      style={[styles.modeButton, navigationMode === 'pathfinder' && styles.modeButtonActive]}
+                      onPress={() => handleNavigationModeChange('pathfinder')}
+                    >
+                      <Ionicons name="map" size={16} color={navigationMode === 'pathfinder' ? '#fff' : '#666'} />
+                      <Text style={[styles.modeButtonText, navigationMode === 'pathfinder' && styles.modeButtonTextActive]}>
+                        PathFinder
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
                 </ScrollView>
               )}
             </View>
@@ -517,6 +701,12 @@ export default function DashboardRider() {
                   <View style={styles.statusIndicator}>
                     <View style={styles.statusDot} />
                     <Text style={styles.statusText}>Active</Text>
+                    <TouchableOpacity 
+                      style={styles.refreshButton}
+                      onPress={fetchRideRequests}
+                    >
+                      <Ionicons name="refresh" size={20} color="#0d4217" />
+                    </TouchableOpacity>
                   </View>
                 )}
               </View>
@@ -532,12 +722,13 @@ export default function DashboardRider() {
                   <Ionicons name="search-outline" size={64} color="#ccc" />
                   <Text style={styles.noRidesText}>No ride requests available</Text>
                   <Text style={styles.noRidesSubtext}>Waiting for new ride requests...</Text>
+                  <Text style={styles.debugText}>Location: {currentLocation.latitude.toFixed(4)}, {currentLocation.longitude.toFixed(4)}</Text>
                 </View>
               ) : (
                 <ScrollView style={styles.ridesList} showsVerticalScrollIndicator={false}>
                   {rideRequests.map((ride) => (
                     <TouchableOpacity
-                      key={ride.id}
+                      key={ride._id || ride.id || 'unknown'}
                       style={styles.rideCard}
                       onPress={() => setSelectedRide(ride)}
                     >
@@ -577,7 +768,7 @@ export default function DashboardRider() {
                         </Text>
                         <TouchableOpacity
                           style={styles.acceptRideButton}
-                          onPress={() => acceptRide(ride.id)}
+                          onPress={() => acceptRide(ride._id || ride.id || '')}
                         >
                           <Text style={styles.acceptRideButtonText}>Accept</Text>
                         </TouchableOpacity>
@@ -653,7 +844,7 @@ export default function DashboardRider() {
           <View style={styles.modalActions}>
             <TouchableOpacity
               style={styles.acceptButton}
-              onPress={() => acceptRide(selectedRide.id)}
+              onPress={() => acceptRide(selectedRide._id || selectedRide.id || '')}
             >
               <Text style={styles.acceptButtonText}>Accept Ride</Text>
             </TouchableOpacity>
@@ -773,6 +964,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
   },
+  refreshButton: {
+    marginLeft: 8,
+    padding: 4,
+  },
   statusDot: {
     width: 8,
     height: 8,
@@ -799,6 +994,12 @@ const styles = StyleSheet.create({
     marginTop: 8,
     textAlign: 'center',
     lineHeight: 20,
+  },
+  debugText: {
+    fontSize: 12,
+    color: '#666',
+    marginTop: 8,
+    textAlign: 'center',
   },
   ridesList: {
     flex: 1,
@@ -956,18 +1157,32 @@ const styles = StyleSheet.create({
     color: '#0d4217',
     marginBottom: 4,
   },
+  navigationHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  navigationModeBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#0d4217',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 8,
+  },
+  navigationModeText: {
+    fontSize: 10,
+    color: '#fff',
+    marginLeft: 4,
+    fontWeight: 'bold',
+  },
   routeInfo: {
     fontSize: 14,
     color: '#666',
   },
   navigationContainer: {
     flex: 1,
-  },
-  navigationHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 16,
   },
   navigationActions: {
     flexDirection: 'row',
@@ -1003,6 +1218,50 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     fontSize: 16,
     marginLeft: 8,
+  },
+  navigationModeContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 16,
+    paddingHorizontal: 8,
+  },
+  navigationModeLabel: {
+    fontSize: 14,
+    color: '#666',
+    fontWeight: '500',
+  },
+  modeButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
+    backgroundColor: '#f0f0f0',
+    marginLeft: 8,
+  },
+  modeButtonActive: {
+    backgroundColor: '#0d4217',
+  },
+  modeButtonText: {
+    fontSize: 12,
+    color: '#666',
+    marginLeft: 4,
+    fontWeight: '500',
+  },
+  modeButtonTextActive: {
+    color: '#fff',
+  },
+  pathfinderStatus: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginLeft: 8,
+  },
+  pathfinderStatusText: {
+    fontSize: 12,
+    color: '#FF6B35',
+    marginLeft: 4,
+    fontWeight: '500',
   },
   rideRequestModal: {
     position: 'absolute',

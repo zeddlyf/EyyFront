@@ -3,6 +3,7 @@ import { View, StyleSheet } from 'react-native';
 import { MapPin } from 'lucide-react-native';
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE, PROVIDER_DEFAULT } from 'react-native-maps';
 import { GOOGLE_MAPS_ENDPOINTS, buildGoogleMapsUrl, TRAVEL_MODES } from '../lib/google-maps-config';
+import { Ionicons } from '@expo/vector-icons';
 
 interface RouteMapProps {
   origin: {
@@ -18,7 +19,26 @@ interface RouteMapProps {
   travelMode?: string;
   showRouteInfo?: boolean;
   onRouteReceived?: (route: any) => void;
-  style?: any; // <-- Add style prop
+  style?: any;
+  additionalMarkers?: Array<{
+    coordinate: {
+      latitude: number;
+      longitude: number;
+    };
+    title: string;
+    description: string;
+    pinColor?: string;
+    icon?: string;
+    onPress?: () => void;
+  }>;
+  showUserLocation?: boolean;
+  showMyLocationButton?: boolean;
+  showCompass?: boolean;
+  showScale?: boolean;
+  showTraffic?: boolean;
+  showBuildings?: boolean;
+  showIndoors?: boolean;
+  mapType?: 'standard' | 'satellite' | 'hybrid';
 }
 
 function RouteMap({ 
@@ -27,7 +47,16 @@ function RouteMap({
   travelMode = TRAVEL_MODES.DRIVING,
   showRouteInfo = true,
   onRouteReceived,
-  style // <-- Accept style prop
+  style,
+  additionalMarkers = [],
+  showUserLocation = true,
+  showMyLocationButton = true,
+  showCompass = true,
+  showScale = true,
+  showTraffic = true,
+  showBuildings = true,
+  showIndoors = true,
+  mapType = 'standard'
 }: RouteMapProps) {
   const mapRef = useRef<MapView>(null);
   const [route, setRoute] = useState<any>(null);
@@ -154,7 +183,7 @@ function RouteMap({
     <View style={styles.container}>
       <MapView
         ref={mapRef}
-        style={style || styles.map} // <-- Use passed style or default
+        style={style || styles.map}
         provider={PROVIDER_DEFAULT}
         initialRegion={{
           latitude: origin.latitude,
@@ -162,14 +191,14 @@ function RouteMap({
           latitudeDelta: 0.0922,
           longitudeDelta: 0.0421,
         }}
-        showsUserLocation={true}
-        showsMyLocationButton={true}
-        showsCompass={true}
-        showsScale={true}
-        showsTraffic={true}
-        showsBuildings={true}
-        showsIndoors={true}
-        mapType="standard"
+        showsUserLocation={showUserLocation}
+        showsMyLocationButton={showMyLocationButton}
+        showsCompass={showCompass}
+        showsScale={showScale}
+        showsTraffic={showTraffic}
+        showsBuildings={showBuildings}
+        showsIndoors={showIndoors}
+        mapType={mapType}
         >
         <Marker 
           coordinate={origin}
@@ -184,6 +213,24 @@ function RouteMap({
           description={destination.address}
           pinColor="#ef4444"
         />
+        
+        {/* Additional Markers */}
+        {additionalMarkers.map((marker, index) => (
+          <Marker
+            key={`additional-${index}`}
+            coordinate={marker.coordinate}
+            title={marker.title}
+            description={marker.description}
+            pinColor={marker.pinColor}
+            onPress={marker.onPress}
+          >
+            {marker.title === "Ride Request" && (
+              <View style={styles.rideRequestMarker}>
+                <Ionicons name="car" size={24} color="#FF6B35" />
+              </View>
+            )}
+          </Marker>
+        ))}
         
         {routeCoordinates.length > 0 && (
           <Polyline
@@ -206,6 +253,15 @@ const styles = StyleSheet.create({
   map: {
     width: '100%',
     height: '100%',
+  },
+  rideRequestMarker: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#fff',
+    borderRadius: 20,
+    padding: 8,
+    borderWidth: 2,
+    borderColor: '#FF6B35',
   }
 });
 

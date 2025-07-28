@@ -110,6 +110,10 @@ export default function LocationCommuter() {
   const [fare, setFare] = useState<number>(0);
   const [totalDistance, setTotalDistance] = useState<number>(0);
   const [waitingForDriver, setWaitingForDriver] = useState(false);
+  const [rideStatus, setRideStatus] = useState<string>('pending');
+  const [acceptedRide, setAcceptedRide] = useState<any>(null);
+  const [driverInfo, setDriverInfo] = useState<any>(null);
+  const [isRideCompleted, setIsRideCompleted] = useState(false);
 
   // Add cache cleaning function
   const cleanCache = () => {
@@ -414,8 +418,8 @@ const handleChooseDestination = async () => {
     // Show waiting for driver UI
     setWaitingForDriver(true);
 
-    // Optionally, you can still navigate or update params if needed
-    // router.push({ ... });
+    // Update URL with ride ID for tracking
+    router.setParams({ rideId: rideResponse.id || rideResponse._id });
 
   } catch (error) {
     console.error('❌ Booking error:', error);
@@ -508,9 +512,24 @@ const handleChooseDestination = async () => {
     }
   };
 
-  // Cleanup location subscription
+  // Cleanup location subscription and reset booking states
   useEffect(() => {
     getCurrentLocation();
+    
+    // Reset booking states when component mounts (for new bookings)
+    setWaitingForDriver(false);
+    setIsRideCompleted(false);
+    setAcceptedRide(null);
+    setDriverInfo(null);
+    setRideStatus('pending');
+    setSearchText('');
+    setDestination(null);
+    setRouteInfo(null);
+    setSearchError(null);
+    setFare(0);
+    setTotalDistance(0);
+    setIsBooking(false);
+    
     return () => {
       if (locationSubscription.current) {
         locationSubscription.current.remove();
@@ -676,6 +695,81 @@ const handleChooseDestination = async () => {
     // Removed pathCoordinates dependency
   }, [currentLocation, isRiderView]);
 
+  // Check ride status periodically when waiting for driver or when ride is accepted
+  useEffect(() => {
+    if ((waitingForDriver || rideStatus === 'accepted') && params.rideId) {
+      // Check immediately
+      checkRideStatus();
+      
+      // Then check every 5 seconds
+      const interval = setInterval(checkRideStatus, 5000);
+      
+      return () => clearInterval(interval);
+    }
+  }, [waitingForDriver, rideStatus, params.rideId]);
+
+  const checkRideStatus = async () => {
+    const rideId = params.rideId;
+    if (!rideId) return;
+
+    try {
+      const rides = await rideAPI.getMyRides();
+      const currentRide = rides.find((ride: any) => ride.id === rideId || ride._id === rideId);
+      
+      if (currentRide) {
+        setRideStatus(currentRide.status);
+        
+        if (currentRide.status === 'accepted') {
+          setWaitingForDriver(false);
+          setAcceptedRide(currentRide);
+          
+          // Enhanced driver info extraction
+          const driverData = extractDriverInfo(currentRide);
+          if (driverData) {
+            setDriverInfo(driverData);
+          }
+          
+          Alert.alert(
+            'Driver Found!', 
+            'A driver has accepted your ride. They are on their way to pick you up.',
+            [{ text: 'OK' }]
+          );
+        } else if (currentRide.status === 'completed') {
+          setWaitingForDriver(false);
+          setIsRideCompleted(true);
+          setAcceptedRide(currentRide);
+          
+          // Enhanced driver info extraction for completion
+          const driverData = extractDriverInfo(currentRide);
+          if (driverData) {
+            setDriverInfo(driverData);
+          }
+          
+          console.log('Ride completed:', currentRide);
+          Alert.alert(
+            'Ride Completed!', 
+            'Your ride has been completed. Thank you for using our service!',
+            [{ 
+              text: 'OK'
+            }]
+          );
+        } else if (currentRide.status === 'cancelled') {
+          setWaitingForDriver(false);
+          Alert.alert(
+            'Ride Cancelled', 
+            'Your ride has been cancelled.',
+            [{ 
+              text: 'OK',
+              onPress: () => router.replace('/dashboardcommuter')
+            }]
+          );
+        }
+      }
+    } catch (error) {
+      console.error('Error checking ride status:', error);
+    }
+  };
+
   const handleCancelRide = async () => {
     setWaitingForDriver(false);
     const rideId = params.rideId;
@@ -692,6 +786,72 @@ const handleChooseDestination = async () => {
       console.error('Error cancelling ride:', error);
       Alert.alert('Error', 'Failed to cancel the ride. Please try again.');
     }
+  };
+
+  const handleRideCompletion = () => {
+    // Reset all booking states
+    setWaitingForDriver(false);
+    setIsRideCompleted(false);
+    setAcceptedRide(null);
+    setDriverInfo(null);
+    setRideStatus('pending');
+    setSearchText('');
+    setDestination(null);
+    setRouteInfo(null);
+    setSearchError(null);
+    setFare(0);
+    setTotalDistance(0);
+    setIsBooking(false);
+    
+    // Navigate back to dashboard after completion
+    router.replace('/dashboardcommuter');
+  };
+
+  const extractDriverInfo = (rideData: any) => {
+    // Enhanced driver info extraction with multiple field checks
+    let driverData = null;
+    
+    if (rideData.driver) {
+      driverData = rideData.driver;
+    } else if (rideData.acceptedBy) {
+      driverData = rideData.acceptedBy;
+    } else if (rideData.driverId) {
+      driverData = rideData.driverId;
+    }
+    
+    if (driverData) {
+      console.log('Driver data found:', driverData);
+      console.log('Available driver fields:', Object.keys(driverData));
+      console.log('Driver name candidates:', {
+        fullName: driverData.fullName,
+        name: driverData.name,
+        full_name: driverData.full_name,
+        firstName: driverData.firstName,
+        lastName: driverData.lastName
+      });
+      
+      return driverData;
+    } else {
+      console.log('No driver data found in ride:', rideData);
+      console.log('Available ride fields:', Object.keys(rideData));
+      return null;
+    }
+  };
+
+  const resetBookingForm = () => {
+    // Reset all booking-related states for a new booking
+    setWaitingForDriver(false);
+    setIsRideCompleted(false);
+    setAcceptedRide(null);
+    setDriverInfo(null);
+    setRideStatus('pending');
+    setSearchText('');
+    setDestination(null);
+    setRouteInfo(null);
+    setSearchError(null);
+    setFare(0);
+    setTotalDistance(0);
+    setIsBooking(false);
   };
 
   return (
@@ -770,20 +930,170 @@ const handleChooseDestination = async () => {
 
         {/* Booking Info Section - Bottom Half */}
         <View style={styles.bookingSection}>
-          {waitingForDriver ? (
-            <View style={styles.waitingContainer}>
-              <ActivityIndicator size="large" color="#0d4217" style={{ marginBottom: 16 }} />
-              <Text style={styles.waitingTitle}>Waiting for driver...</Text>
-              <Text style={styles.waitingSubtitle}>
-                Your ride request has been sent. Please wait while we connect you to a driver.
+          {isRideCompleted ? (
+            <ScrollView 
+              style={styles.completionContainer} 
+              contentContainerStyle={styles.completionContent}
+              showsVerticalScrollIndicator={false}
+            >
+              <Ionicons name="checkmark-circle" size={48} color="#28a745" style={{ marginBottom: 12 }} />
+              <Text style={styles.completionTitle}>Ride Completed!</Text>
+              <Text style={styles.completionSubtitle}>
+                Thank you for using our service. Your ride has been completed successfully.
               </Text>
+              
+              {acceptedRide && (
+                <View style={styles.rideSummary}>
+                  <Text style={styles.rideSummaryTitle}>Ride Summary:</Text>
+                  
+                  <View style={styles.summaryRow}>
+                    <Ionicons name="location" size={16} color="#0d4217" />
+                    <Text style={styles.summaryLabel}>From:</Text>
+                    <Text style={styles.summaryValue} numberOfLines={1}>
+                      {acceptedRide.pickupLocation?.address || 'Pickup Location'}
+                    </Text>
+                  </View>
+                  
+                  <View style={styles.summaryRow}>
+                    <Ionicons name="flag" size={16} color="#e74c3c" />
+                    <Text style={styles.summaryLabel}>To:</Text>
+                    <Text style={styles.summaryValue} numberOfLines={1}>
+                      {acceptedRide.dropoffLocation?.address || 'Destination'}
+                    </Text>
+                  </View>
+                  
+                  <View style={styles.summaryRow}>
+                    <Ionicons name="navigate" size={16} color="#666" />
+                    <Text style={styles.summaryLabel}>Distance:</Text>
+                    <Text style={styles.summaryValue}>
+                      {(acceptedRide.distance / 1000).toFixed(1)} km
+                    </Text>
+                  </View>
+                  
+                  <View style={styles.summaryRow}>
+                    <Ionicons name="cash" size={16} color="#28a745" />
+                    <Text style={styles.summaryLabel}>Fare:</Text>
+                    <Text style={styles.summaryValue}>
+                      ₱{acceptedRide.fare?.toFixed(2) || '0.00'}
+                    </Text>
+                  </View>
+                  
+                  {driverInfo && (
+                    <View style={styles.summaryRow}>
+                      <Ionicons name="person" size={16} color="#0d4217" />
+                      <Text style={styles.summaryLabel}>Driver:</Text>
+                      <Text style={styles.summaryValue}>
+                        {driverInfo.fullName || driverInfo.name || driverInfo.full_name || 
+                         (driverInfo.firstName && driverInfo.lastName ? `${driverInfo.firstName} ${driverInfo.lastName}` : null) ||
+                         'Driver'}
+                      </Text>
+                    </View>
+                  )}
+                  
+                  <View style={styles.summaryRow}>
+                    <Ionicons name="time" size={16} color="#666" />
+                    <Text style={styles.summaryLabel}>Status:</Text>
+                    <Text style={styles.summaryValue}>Completed</Text>
+                  </View>
+                </View>
+              )}
+              
+              <TouchableOpacity
+                style={styles.backToDashboardButton}
+                onPress={handleRideCompletion}
+              >
+                <Text style={styles.backToDashboardButtonText}>Back to Dashboard</Text>
+              </TouchableOpacity>
+            </ScrollView>
+          ) : waitingForDriver || rideStatus === 'accepted' ? (
+            <ScrollView 
+              style={styles.waitingContainer} 
+              contentContainerStyle={styles.waitingContent}
+              showsVerticalScrollIndicator={false}
+            >
+              {rideStatus === 'accepted' ? (
+                // Driver accepted the ride
+                <>
+                  <View style={styles.driverAcceptedContainer}>
+                    <View style={styles.successHeader}>
+                      <Ionicons name="checkmark-circle" size={40} color="#28a745" />
+                      <Text style={styles.successTitle}>Driver Found!</Text>
+                    </View>
+                    
+                    <Text style={styles.waitingSubtitle}>
+                      A driver has accepted your ride and is on their way to pick you up.
+                    </Text>
+                    
+                    {driverInfo && (
+                      <View style={styles.driverInfoCard}>
+                        <View style={styles.driverInfoHeader}>
+                          <Ionicons name="person-circle" size={20} color="#0d4217" />
+                          <Text style={styles.driverInfoTitle}>Driver Information</Text>
+                        </View>
+                        <View style={styles.driverInfoContent}>
+                          <View style={styles.driverInfoRow}>
+                            <Ionicons name="person" size={14} color="#666" />
+                            <Text style={styles.driverInfoLabel}>Name:</Text>
+                            <Text style={styles.driverInfoValue}>
+                              {driverInfo.fullName || driverInfo.name || driverInfo.full_name || 
+                               (driverInfo.firstName && driverInfo.lastName ? `${driverInfo.firstName} ${driverInfo.lastName}` : null) ||
+                               'Driver'}
+                            </Text>
+                          </View>
+                          <View style={styles.driverInfoRow}>
+                            <Ionicons name="car" size={14} color="#666" />
+                            <Text style={styles.driverInfoLabel}>Vehicle:</Text>
+                            <Text style={styles.driverInfoValue}>Tricycle</Text>
+                          </View>
+                          {driverInfo.phoneNumber && (
+                            <View style={styles.driverInfoRow}>
+                              <Ionicons name="call" size={14} color="#666" />
+                              <Text style={styles.driverInfoLabel}>Phone:</Text>
+                              <Text style={styles.driverInfoValue}>{driverInfo.phoneNumber}</Text>
+                            </View>
+                          )}
+                        </View>
+                      </View>
+                    )}
+                    
+                    <View style={styles.rideStatusCard}>
+                      <View style={styles.statusHeader}>
+                        <Ionicons name="navigate" size={18} color="#28a745" />
+                        <Text style={styles.statusTitle}>Ride Status</Text>
+                      </View>
+                      <View style={styles.statusContent}>
+                        <View style={styles.statusRow}>
+                          <View style={styles.statusIndicator}>
+                            <View style={styles.statusDot} />
+                          </View>
+                          <Text style={styles.statusText}>Driver en route to pickup</Text>
+                        </View>
+                        <View style={styles.statusRow}>
+                          <Ionicons name="time" size={14} color="#666" />
+                          <Text style={styles.estimatedTime}>Estimated arrival: 5-10 minutes</Text>
+                        </View>
+                      </View>
+                    </View>
+                  </View>
+                </>
+              ) : (
+                // Still waiting for driver
+                <>
+                  <ActivityIndicator size="large" color="#0d4217" style={{ marginBottom: 12 }} />
+                  <Text style={styles.waitingTitle}>Waiting for driver...</Text>
+                  <Text style={styles.waitingSubtitle}>
+                    Your ride request has been sent. Please wait while we connect you to a driver.
+                  </Text>
+                </>
+              )}
+              
               <TouchableOpacity
                 style={styles.cancelButton}
                 onPress={handleCancelRide}
               >
                 <Text style={styles.cancelButtonText}>Cancel Ride</Text>
               </TouchableOpacity>
-            </View>
+            </ScrollView>
           ) : (
             <View style={styles.bookingInfo}>
               {/* Route Information */}
@@ -911,9 +1221,11 @@ const styles = StyleSheet.create({
   },
   waitingContainer: {
     flex: 1,
+  },
+  waitingContent: {
     alignItems: 'center',
-    justifyContent: 'center',
     paddingHorizontal: 20,
+    paddingVertical: 20,
   },
   waitingTitle: {
     fontSize: 20,
@@ -1193,5 +1505,218 @@ const styles = StyleSheet.create({
     marginLeft: 4,
     marginBottom: 2,
     maxWidth: '100%',
+  },
+  driverAcceptedContainer: {
+    alignItems: 'center',
+    marginBottom: 20,
+    
+  },
+  driverInfo: {
+    backgroundColor: '#f8f9fa',
+    padding: 16,
+    borderRadius: 8,
+    marginVertical: 16,
+    width: '100%',
+  },
+  driverInfoTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#0d4217',
+    marginBottom: 8,
+  },
+  driverInfoText: {
+    fontSize: 14,
+    color: '#333',
+    marginBottom: 4,
+  },
+  rideStatusContainer: {
+    backgroundColor: '#e8f5e8',
+    padding: 12,
+    borderRadius: 8,
+    marginVertical: 8,
+    width: '100%',
+  },
+  rideStatusText: {
+    fontSize: 14,
+    color: '#28a745',
+    fontWeight: '500',
+    textAlign: 'center',
+    marginBottom: 2,
+  },
+  completionContainer: {
+    flex: 1,
+  },
+  completionContent: {
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 20,
+  },
+  completionTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#28a745',
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  completionSubtitle: {
+    fontSize: 16,
+    color: '#333',
+    textAlign: 'center',
+    marginBottom: 24,
+    lineHeight: 22,
+  },
+  rideSummary: {
+    backgroundColor: '#f8f9fa',
+    padding: 16,
+    borderRadius: 8,
+    marginVertical: 16,
+    width: '100%',
+  },
+  rideSummaryTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#0d4217',
+    marginBottom: 8,
+  },
+  rideSummaryText: {
+    fontSize: 14,
+    color: '#333',
+    marginBottom: 4,
+  },
+  backToDashboardButton: {
+    backgroundColor: '#0d4217',
+    paddingVertical: 12,
+    paddingHorizontal: 32,
+    borderRadius: 25,
+    alignItems: 'center',
+    marginTop: 16,
+  },
+  backToDashboardButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  successHeader: {
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  successTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#28a745',
+    marginTop: 6,
+    textAlign: 'center',
+  },
+  driverInfoCard: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 12,
+    marginVertical: 12,
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.1,
+    shadowRadius: 3.84,
+    elevation: 3,
+  },
+  driverInfoHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  driverInfoContent: {
+    gap: 8,
+  },
+  driverInfoRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  driverInfoLabel: {
+    fontSize: 14,
+    color: '#666',
+    fontWeight: '500',
+    minWidth: 60,
+  },
+  driverInfoValue: {
+    fontSize: 14,
+    color: '#333',
+    fontWeight: '600',
+    flex: 1,
+  },
+  rideStatusCard: {
+    backgroundColor: '#e8f5e8',
+    borderRadius: 12,
+    padding: 12,
+    marginVertical: 8,
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 1,
+    },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  statusHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  statusTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#28a745',
+    marginLeft: 8,
+  },
+  statusContent: {
+    gap: 8,
+  },
+  statusRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  statusIndicator: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#28a745',
+  },
+  statusText: {
+    fontSize: 14,
+    color: '#28a745',
+    fontWeight: '600',
+  },
+  estimatedTime: {
+    fontSize: 14,
+    color: '#666',
+    marginLeft: 4,
+  },
+  statusDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#28a745',
+  },
+  summaryRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+    gap: 8,
+  },
+  summaryLabel: {
+    fontSize: 14,
+    color: '#666',
+    fontWeight: '500',
+    minWidth: 60,
+  },
+  summaryValue: {
+    fontSize: 14,
+    color: '#333',
+    fontWeight: '600',
+    flex: 1,
   },
 }); 
