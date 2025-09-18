@@ -4,12 +4,20 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // Use the user's local IP address as the primary server URL.
 // Fallback to Constants.expoConfig?.extra?.serverUrl if the IP is not available (less likely).
-const USER_LOCAL_IP = 'http://192.168.26.35:3000';
+const USER_LOCAL_IP = 'http://10.128.65.35:3000';
+const FALLBACK_IPS = [
+  'http://192.168.56.1:3000',
+  'http://192.168.57.2:3000',
+  'http://localhost:3000',
+  'http://127.0.0.1:3000'
+];
+
 export const API_URL = USER_LOCAL_IP || Constants.expoConfig?.extra?.serverUrl;
+export const FALLBACK_URLS = FALLBACK_IPS;
 
 // Ensure API_URL is set, otherwise throw an error
 if (!API_URL) {
-  throw new Error('API_URL is not defined. Make sure your barckend server IP is correctly set or serverUrl is configured in app.json');
+  throw new Error('API_URL is not defined. Make sure your backend server IP is correctly set or serverUrl is configured in app.json');
 }
 
 // Create axios instance with base configuration
@@ -64,25 +72,72 @@ api.interceptors.response.use(
 );
 
 // Types
+interface Address {
+  street?: string;
+  city: string;
+  province: string;
+  postalCode?: string;
+  country?: string;
+  fullAddress?: string;
+}
+
 interface UserData {
+  firstName: string;
+  lastName: string;
+  middleName?: string;
   email: string;
   password: string;
-  fullName: string;
   phoneNumber: string;
-  role?: 'driver' | 'commuter';
+  role?: 'driver' | 'commuter' | 'admin';
   licenseNumber?: string;
+  address?: Address;
 }
 
 interface AuthResponse {
   token: string;
   user: {
-    id: string;
-    email: string;
+    _id: string;
+    firstName: string;
+    lastName: string;
+    middleName?: string;
     fullName: string;
+    email: string;
     phoneNumber: string;
-    role: 'driver' | 'commuter';
+    role: 'driver' | 'commuter' | 'admin';
     licenseNumber?: string;
+    address?: Address;
+    approvalStatus?: 'pending' | 'approved' | 'rejected';
+    isAvailable?: boolean;
+    rating?: number;
+    totalRides?: number;
+    isActive?: boolean;
+    profilePicture?: string;
   };
+}
+
+interface UserProfile {
+  _id: string;
+  firstName: string;
+  lastName: string;
+  middleName?: string;
+  fullName: string;
+  email: string;
+  phoneNumber: string;
+  role: 'driver' | 'commuter' | 'admin';
+  licenseNumber?: string;
+  address?: Address;
+  approvalStatus?: 'pending' | 'approved' | 'rejected';
+  isAvailable?: boolean;
+  rating?: number;
+  totalRides?: number;
+  isActive?: boolean;
+  profilePicture?: string;
+  location?: {
+    type: 'Point';
+    coordinates: [number, number];
+  };
+  createdAt: string;
+  updatedAt: string;
 }
 
 // Auth API endpoints
@@ -131,11 +186,11 @@ const authAPI = {
 
 // User API endpoints
 const userAPI = {
-  getProfile: async () => {
+  getProfile: async (): Promise<UserProfile> => {
     const response = await api.get('/api/users/profile');
     return response.data;
   },
-  updateProfile: async (data: any) => {
+  updateProfile: async (data: Partial<UserProfile>) => {
     // Only PATCH is allowed, and only certain fields
     const response = await api.patch('/api/users/profile', data);
     return response.data;
@@ -154,6 +209,68 @@ const userAPI = {
     });
     return response.data;
   },
+  // Address-specific endpoints
+  getAddress: async (): Promise<Address> => {
+    const response = await api.get('/api/users/address');
+    return response.data;
+  },
+  updateAddress: async (address: Partial<Address>) => {
+    const response = await api.patch('/api/users/address', address);
+    return response.data;
+  },
+  getUsersByCity: async (city: string, role?: 'driver' | 'commuter') => {
+    const params = role ? { role } : {};
+    const response = await api.get(`/api/users/by-city/${encodeURIComponent(city)}`, { params });
+    return response.data;
+  },
+  // Admin endpoints
+  getAllUsers: async (params?: {
+    page?: number;
+    limit?: number;
+    role?: 'driver' | 'commuter' | 'admin';
+    approvalStatus?: 'pending' | 'approved' | 'rejected';
+    search?: string;
+  }) => {
+    const response = await api.get('/api/users', { params });
+    return response.data;
+  },
+  getUserById: async (id: string) => {
+    const response = await api.get(`/api/users/${id}`);
+    return response.data;
+  },
+  createUser: async (userData: UserData) => {
+    const response = await api.post('/api/users', userData);
+    return response.data;
+  },
+  updateUser: async (id: string, userData: Partial<UserProfile>) => {
+    const response = await api.put(`/api/users/${id}`, userData);
+    return response.data;
+  },
+  patchUser: async (id: string, userData: Partial<UserProfile>) => {
+    const response = await api.patch(`/api/users/${id}`, userData);
+    return response.data;
+  },
+  deleteUser: async (id: string) => {
+    const response = await api.delete(`/api/users/${id}`);
+    return response.data;
+  },
+  hardDeleteUser: async (id: string) => {
+    const response = await api.delete(`/api/users/${id}/hard`);
+    return response.data;
+  },
+  // Driver approval endpoints
+  getPendingDrivers: async () => {
+    const response = await api.get('/api/users/admin/drivers/pending');
+    return response.data;
+  },
+  approveDriver: async (id: string) => {
+    const response = await api.post(`/api/users/admin/drivers/${id}/approve`);
+    return response.data;
+  },
+  rejectDriver: async (id: string) => {
+    const response = await api.post(`/api/users/admin/drivers/${id}/reject`);
+    return response.data;
+  },
 };
 
 // Ride API endpoints
@@ -165,6 +282,15 @@ const rideAPI = {
   },
   getMyRides: async () => {
     const response = await api.get('/api/rides/my-rides');
+    return response.data;
+  },
+  getAllRides: async (status?: string) => {
+    const params = status ? { status } : {};
+    const response = await api.get('/api/rides', { params });
+    return response.data;
+  },
+  getRideById: async (id: string) => {
+    const response = await api.get(`/api/rides/${id}`);
     return response.data;
   },
   getNearbyRides: async (latitude: number, longitude: number, maxDistance = 5000) => {
@@ -179,6 +305,11 @@ const rideAPI = {
   },
   updateRideStatus: async (id: string, status: string) => {
     const response = await api.patch(`/api/rides/${id}/status`, { status });
+    return response.data;
+  },
+  completeRide: async (id: string, rating?: number) => {
+    const data = rating ? { rating } : {};
+    const response = await api.post(`/api/rides/${id}/complete`, data);
     return response.data;
   },
   rateRide: async (id: string, rating: number, feedback?: string) => {
@@ -209,6 +340,14 @@ const walletAPI = {
     const response = await api.delete(`/api/wallets/${id}`);
     return response.data;
   },
+  addFunds: async (amount: number) => {
+    const response = await api.post('/api/wallets/add-funds', { amount });
+    return response.data;
+  },
+  withdrawFunds: async (amount: number) => {
+    const response = await api.post('/api/wallets/withdraw', { amount });
+    return response.data;
+  },
 };
 
 // Payment API endpoints
@@ -235,7 +374,85 @@ const paymentAPI = {
   },
 };
 
-export { authAPI, userAPI, rideAPI, walletAPI, paymentAPI };
-export type { UserData, AuthResponse };
+// Utility functions
+const apiUtils = {
+  // Check if user is authenticated
+  isAuthenticated: async (): Promise<boolean> => {
+    try {
+      const token = await AsyncStorage.getItem('token');
+      return !!token;
+    } catch {
+      return false;
+    }
+  },
+  
+  // Get stored user data
+  getStoredUser: async () => {
+    try {
+      const userData = await AsyncStorage.getItem('user');
+      return userData ? JSON.parse(userData) : null;
+    } catch {
+      return null;
+    }
+  },
+  
+  // Clear all stored data
+  clearStoredData: async () => {
+    try {
+      await AsyncStorage.removeItem('token');
+      await AsyncStorage.removeItem('user');
+    } catch (error) {
+      console.error('Error clearing stored data:', error);
+    }
+  },
+  
+  // Set stored user data
+  setStoredUser: async (user: any) => {
+    try {
+      await AsyncStorage.setItem('user', JSON.stringify(user));
+    } catch (error) {
+      console.error('Error storing user data:', error);
+    }
+  },
+  
+  // Test server connectivity
+  testConnection: async (url?: string): Promise<{ success: boolean; url: string; error?: string }> => {
+    const testUrl = url || API_URL;
+    try {
+      const response = await axios.get(`${testUrl}/api/auth/me`, {
+        timeout: 5000,
+        headers: { 'Content-Type': 'application/json' }
+      });
+      return { success: true, url: testUrl };
+    } catch (error: any) {
+      return { 
+        success: false, 
+        url: testUrl, 
+        error: error.message || 'Connection failed' 
+      };
+    }
+  },
+  
+  // Find working server URL
+  findWorkingServer: async (): Promise<string | null> => {
+    const urlsToTest = [API_URL, ...FALLBACK_URLS];
+    
+    for (const url of urlsToTest) {
+      const result = await apiUtils.testConnection(url);
+      if (result.success) {
+        console.log(`✅ Found working server at: ${url}`);
+        return url;
+      } else {
+        console.log(`❌ Failed to connect to: ${url} - ${result.error}`);
+      }
+    }
+    
+    console.log('❌ No working server found. Please check if your backend is running.');
+    return null;
+  }
+};
+
+export { authAPI, userAPI, rideAPI, walletAPI, paymentAPI, apiUtils };
+export type { UserData, AuthResponse, UserProfile, Address };
 
 export default api; 
