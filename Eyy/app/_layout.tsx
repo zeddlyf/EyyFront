@@ -3,6 +3,7 @@ import { useColorScheme } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { AuthProvider } from '../lib/AuthContext';
+import { SocketProvider } from '../lib/socket-context';
 
 // Import polyfills first
 import 'react-native-url-polyfill/auto';
@@ -14,37 +15,35 @@ function RootLayout() {
 
   return (
     <AuthProvider>
-      <GestureHandlerRootView style={{ flex: 1 }}>
-        <SafeAreaProvider>
-          <Stack
-            screenOptions={{
-              headerShown: false,
-              contentStyle: {
-                backgroundColor: '#0B4619',
-              },
-            }}
-          >
-            <Stack.Screen name="index" />
-            <Stack.Screen name="(auth)" />
-            <Stack.Screen name="(tabs)" />
-            <Stack.Screen name="(commuter)" />
-            <Stack.Screen name="logincommuter" />
-            <Stack.Screen name="loginrider" />
-            <Stack.Screen name="signupcommuter" />
-            <Stack.Screen name="signuprider" />
-            <Stack.Screen name="dashboardrider" />
-            <Stack.Screen name="historyrider" />
-            <Stack.Screen name="profilerider" />
-            <Stack.Screen name="locationcommuter" />
-            <Stack.Screen name="menucommuter" />
-            <Stack.Screen name="menurider" />
-            <Stack.Screen name="otpcommuter" />
-            <Stack.Screen name="otprider" />
-            <Stack.Screen name="waitingcommuter" />
-            <Stack.Screen name="forgot-password" />
-          </Stack>
-        </SafeAreaProvider>
-      </GestureHandlerRootView>
+      <SocketProvider>
+        <GestureHandlerRootView style={{ flex: 1 }}>
+          <SafeAreaProvider>
+            <Stack
+              screenOptions={{
+                headerShown: false,
+                contentStyle: {
+                  backgroundColor: '#0B4619',
+                },
+              }}
+            >
+              <Stack.Screen name="index" />
+              <Stack.Screen name="(auth)" />
+              <Stack.Screen name="(tabs)" />
+              <Stack.Screen name="(commuter)" />
+              <Stack.Screen name="(driver)" />
+              <Stack.Screen name="logincommuter" />
+              <Stack.Screen name="loginrider" />
+              <Stack.Screen name="signupcommuter" />
+              <Stack.Screen name="signuprider" /> 
+              <Stack.Screen name="locationcommuter" />
+              <Stack.Screen name="otpcommuter" />
+              <Stack.Screen name="otprider" />
+              <Stack.Screen name="waitingcommuter" />
+              <Stack.Screen name="forgot-password" />
+            </Stack>
+          </SafeAreaProvider>
+        </GestureHandlerRootView>
+      </SocketProvider>
     </AuthProvider>
   );
 }

@@ -1,6 +1,6 @@
 import React, { createContext, useState, useContext, useEffect } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { auth } from './api';
+import { authAPI } from './api';
 
 interface AuthContextType {
   user: any;
@@ -8,6 +8,7 @@ interface AuthContextType {
   login: (email: string, password: string) => Promise<void>;
   register: (userData: any) => Promise<void>;
   logout: () => Promise<void>;
+  updateUser: (userData: any) => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -35,7 +36,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const login = async (email: string, password: string) => {
     try {
-      const data = await auth.login(email, password);
+      const data = await authAPI.login(email, password);
       setUser(data.user);
     } catch (error) {
       throw error;
@@ -44,7 +45,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const register = async (userData: any) => {
     try {
-      const data = await auth.register(userData);
+      const data = await authAPI.register(userData);
       setUser(data.user);
     } catch (error) {
       throw error;
@@ -53,15 +54,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const logout = async () => {
     try {
-      await auth.logout();
+      await authAPI.logout();
       setUser(null);
     } catch (error) {
       throw error;
     }
   };
+  
+  const updateUser = (userData: any) => {
+    setUser({ ...user, ...userData });
+    AsyncStorage.setItem('user', JSON.stringify({ ...user, ...userData }));
+    // Update user state in other components
+    setUser({ ...user, ...userData });
+    
+  };
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, register, logout }}>
+    <AuthContext.Provider value={{ user, loading, login, register, logout, updateUser }}>
       {children}
     </AuthContext.Provider>
   );

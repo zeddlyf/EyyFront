@@ -3,6 +3,7 @@
     "name": "EyyTrike",
     "slug": "eyytrike",
     "version": "1.0.0",
+    "sdkVersion": "54.0.0",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
     "scheme": "eyytrike",
@@ -46,12 +47,24 @@
         {
           "locationAlwaysAndWhenInUsePermission": "Allow EyyTrike to use your location to provide navigation and location-based services."
         }
-      ]
+      ],
+      "expo-font",
+      "expo-router",
+      "expo-web-browser"
     ],
     "extra": {
-      "serverUrl": "http://localhost:3000",
-      "apiUrl": "http://localhost:3000/api",
-      "googleMapsApiKey": "YOUR_GOOGLE_MAPS_API_KEY"
+      "serverUrl": "https://eyyback-production.up.railway.app",
+      "apiUrl": "https://eyyback-production.up.railway.app/api",
+      "socketUrl": "https://eyyback-production.up.railway.app",
+      "googleMapsApiKey": "YOUR_GOOGLE_MAPS_API_KEY",
+      "fallbackUrls": [
+        "http://10.128.65.35:3000",
+        "http://192.168.56.1:3000",
+        "http://192.168.57.2:3000",
+        "http://127.0.0.1:3000"
+      ],
+      "mongodbUri": "mongodb://localhost:27017/eyytrike",
+      "jwtSecret": "your-super-secret-jwt-key-here"
     }
   }
 }

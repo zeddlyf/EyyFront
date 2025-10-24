@@ -135,7 +135,7 @@ export default function DashboardCommuter() {
         <MapView
           ref={mapRef}
           provider={PROVIDER_GOOGLE}
-          style={styles.map}
+          style={StyleSheet.absoluteFill}
           initialRegion={region}
           onRegionChangeComplete={setRegion}
           showsUserLocation={true}
@@ -169,24 +169,23 @@ export default function DashboardCommuter() {
         >
           <Ionicons name="locate" size={24} color="#0d4217" />
         </TouchableOpacity>
+        {/* Book Button - now absolutely positioned */}
+        <TouchableOpacity 
+          style={styles.bookButton}
+          onPress={() => router.push({
+            pathname: '/booking',
+            params: {
+              initialLocation: JSON.stringify({
+                latitude: currentLocation.latitude,
+                longitude: currentLocation.longitude,
+                accuracy: locationAccuracy
+              })
+            }
+          })}
+        >
+          <Text style={styles.bookButtonText}>Book eyytrike</Text>
+        </TouchableOpacity>
       </View>
-
-      {/* Book Button */}
-      <TouchableOpacity 
-        style={styles.bookButton}
-        onPress={() => router.push({
-          pathname: '/locationcommuter',
-          params: {
-            initialLocation: JSON.stringify({
-              latitude: currentLocation.latitude,
-              longitude: currentLocation.longitude,
-              accuracy: locationAccuracy
-            })
-          }
-        })}
-      >
-        <Text style={styles.bookButtonText}>Book eyytrike</Text>
-      </TouchableOpacity>
     </SafeAreaView>
   );
 }
@@ -215,8 +214,7 @@ const styles = StyleSheet.create({
     position: 'relative',
   },
   map: {
-    width: '100%',
-    height: '100%',
+    // Removed width and height, using StyleSheet.absoluteFill instead
   },
   currentLocationMarker: {
     alignItems: 'center',
@@ -250,10 +248,21 @@ const styles = StyleSheet.create({
   bookButton: {
     backgroundColor: '#FFD700',
     paddingVertical: 16,
-    margin: 16,
+    paddingHorizontal: 32,
     borderRadius: 25,
     alignItems: 'center',
-    marginBottom: 90,
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 40,
+    marginHorizontal: 40,
+    // Removed marginBottom
+    alignSelf: 'center',
+    elevation: 5,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
   },
   bookButtonText: {
     color: '#0d4217',

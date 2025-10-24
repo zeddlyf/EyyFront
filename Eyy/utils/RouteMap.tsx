@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { View, StyleSheet } from 'react-native';
 import { MapPin } from 'lucide-react-native';
-import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from 'react-native-maps';
+import MapView, { Marker, Polyline, PROVIDER_GOOGLE, PROVIDER_DEFAULT } from 'react-native-maps';
 import { GOOGLE_MAPS_ENDPOINTS, buildGoogleMapsUrl, TRAVEL_MODES } from '../lib/google-maps-config';
+import { Ionicons } from '@expo/vector-icons';
 
 interface RouteMapProps {
   origin: {
@@ -18,6 +19,28 @@ interface RouteMapProps {
   travelMode?: string;
   showRouteInfo?: boolean;
   onRouteReceived?: (route: any) => void;
+  style?: any;
+  additionalMarkers?: Array<{
+    coordinate: {
+      latitude: number;
+      longitude: number;
+    };
+    title: string;
+    description: string;
+    pinColor?: string;
+    icon?: string;
+    onPress?: () => void;
+  }>;
+  showUserLocation?: boolean;
+  showMyLocationButton?: boolean;
+  showCompass?: boolean;
+  showScale?: boolean;
+  showTraffic?: boolean;
+  showBuildings?: boolean;
+  showIndoors?: boolean;
+  mapType?: 'standard' | 'satellite' | 'hybrid';
+  useDijkstra?: boolean;
+  pathFinder?: any;
 }
 
 function RouteMap({ 
@@ -25,7 +48,19 @@ function RouteMap({
   destination, 
   travelMode = TRAVEL_MODES.DRIVING,
   showRouteInfo = true,
-  onRouteReceived 
+  onRouteReceived,
+  style,
+  additionalMarkers = [],
+  showUserLocation = true,
+  showMyLocationButton = true,
+  showCompass = true,
+  showScale = true,
+  showTraffic = true,
+  showBuildings = true,
+  showIndoors = true,
+  mapType = 'standard',
+  useDijkstra = false,
+  pathFinder = null
 }: RouteMapProps) {
   const mapRef = useRef<MapView>(null);
   const [route, setRoute] = useState<any>(null);
@@ -33,10 +68,54 @@ function RouteMap({
 
   useEffect(() => {
     if (origin && destination) {
-      fetchGoogleRoute();
+      if (useDijkstra && pathFinder) {
+        fetchDijkstraRoute();
+      } else {
+        fetchGoogleRoute();
+      }
       fitMapToMarkers();
     }
-  }, [origin, destination, travelMode]);
+  }, [origin, destination, travelMode, useDijkstra, pathFinder]);
+
+  const fetchDijkstraRoute = async () => {
+    try {
+      if (!pathFinder) {
+        console.error('PathFinder not provided for Dijkstra routing');
+        return;
+      }
+
+      // Find nearest nodes to origin and destination
+      const startNode = pathFinder.findNearestOsmNode({
+        latitude: origin.latitude,
+        longitude: origin.longitude
+      });
+      const endNode = pathFinder.findNearestOsmNode({
+        latitude: destination.latitude,
+        longitude: destination.longitude
+      });
+
+      if (!startNode || !endNode) {
+        console.error('Could not find route points on road network');
+        return;
+      }
+
+      // Calculate route using Dijkstra algorithm
+      const result = pathFinder.findShortestPath(startNode, endNode);
+
+      if (result && result.path && result.path.length > 0) {
+        // Convert path to coordinates
+        const coordinates = pathFinder.getDetailedPathCoordinates(result.path);
+        
+        setRoute(result);
+        setRouteCoordinates(coordinates);
+        onRouteReceived?.(result);
+      } else {
+        console.warn('No route found using Dijkstra algorithm');
+      }
+    } catch (error) {
+      console.error('Error fetching Dijkstra route:', error);
+    }
+  };
 
   const fetchGoogleRoute = async () => {
     try {
@@ -152,22 +231,22 @@ function RouteMap({
     <View style={styles.container}>
       <MapView
         ref={mapRef}
-        style={styles.map}
-        provider={PROVIDER_GOOGLE}
+        style={style || styles.map}
+        provider={PROVIDER_DEFAULT}
         initialRegion={{
           latitude: origin.latitude,
           longitude: origin.longitude,
           latitudeDelta: 0.0922,
           longitudeDelta: 0.0421,
         }}
-        showsUserLocation={true}
-        showsMyLocationButton={true}
-        showsCompass={true}
-        showsScale={true}
-        showsTraffic={true}
-        showsBuildings={true}
-        showsIndoors={true}
-        mapType="standard"
+        showsUserLocation={showUserLocation}
+        showsMyLocationButton={showMyLocationButton}
+        showsCompass={showCompass}
+        showsScale={showScale}
+        showsTraffic={showTraffic}
+        showsBuildings={showBuildings}
+        showsIndoors={showIndoors}
+        mapType={mapType}
         >
         <Marker 
           coordinate={origin}
@@ -182,6 +261,24 @@ function RouteMap({
           description={destination.address}
           pinColor="#ef4444"
         />
+        
+        {/* Additional Markers */}
+        {additionalMarkers.map((marker, index) => (
+          <Marker
+            key={`additional-${index}`}
+            coordinate={marker.coordinate}
+            title={marker.title}
+            description={marker.description}
+            pinColor={marker.pinColor}
+            onPress={marker.onPress}
+          >
+            {marker.title === "Ride Request" && (
+              <View style={styles.rideRequestMarker}>
+                <Ionicons name="car" size={24} color="#FF6B35" />
+              </View>
+            )}
+          </Marker>
+        ))}
         
         {routeCoordinates.length > 0 && (
           <Polyline
@@ -204,6 +301,15 @@ const styles = StyleSheet.create({
   map: {
     width: '100%',
     height: '100%',
+  },
+  rideRequestMarker: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#fff',
+    borderRadius: 20,
+    padding: 8,
+    borderWidth: 2,
+    borderColor: '#FF6B35',
   }
 });
 

@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { Socket } from 'socket.io-client';
 import createSocket from './socket-config';
-import Constants from 'expo-constants';
+import { getSocketUrl } from './config';
 
 // Define the context type
 interface SocketContextType {
@@ -24,8 +24,8 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    // Get the server URL from environment variables or use a default
-    const serverUrl = Constants.expoConfig?.extra?.serverUrl || 'http://localhost:3000';
+    // Get the server URL from config
+    const serverUrl = getSocketUrl();
     
     try {
       // Create socket connection

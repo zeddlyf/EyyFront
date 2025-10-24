@@ -14,6 +14,10 @@ export default function RiderSignUpScreen() {
     fullName: '',
     email: '',
     phoneNumber: '',
+    street: '',
+    city: '',
+    province: '',
+    postalCode: '',
     password: '',
     confirmPassword: '',
     licenseNumber: '',
@@ -23,21 +27,56 @@ export default function RiderSignUpScreen() {
     setFormData(prev => ({ ...prev, [field]: value }));
   };
 
-  const handleSignUp = async () => {
-    // Validate form
-    if (!formData.fullName || !formData.email || !formData.phoneNumber || 
-        !formData.password || !formData.confirmPassword || !formData.licenseNumber) {
-      Alert.alert('Error', 'Please fill in all fields');
-      return;
+  const validateForm = () => {
+    if (!formData.fullName.trim()) {
+      Alert.alert('Error', 'Please enter your full name');
+      return false;
     }
-
+    if (!formData.email.trim()) {
+      Alert.alert('Error', 'Please enter your email');
+      return false;
+    }
+    if (!/\S+@\S+\.\S+/.test(formData.email)) {
+      Alert.alert('Error', 'Please enter a valid email address');
+      return false;
+    }
+    if (!formData.phoneNumber.trim()) {
+      Alert.alert('Error', 'Please enter your phone number');
+      return false;
+    }
+    if (!/^\+?[\d\s\-\(\)]+$/.test(formData.phoneNumber.trim())) {
+      Alert.alert('Error', 'Please enter a valid phone number');
+      return false;
+    }
+    if (!formData.licenseNumber.trim()) {
+      Alert.alert('Error', 'Please enter your license number');
+      return false;
+    }
+    if (!formData.password) {
+      Alert.alert('Error', 'Please enter a password');
+      return false;
+    }
+    if (formData.password.length < 6) {
+      Alert.alert('Error', 'Password must be at least 6 characters long');
+      return false;
+    }
+    if (!/(?=.*[a-z])(?=.*[A-Z])(?=.*\d)/.test(formData.password)) {
+      Alert.alert('Error', 'Password must contain at least one uppercase letter, one lowercase letter, and one number');
+      return false;
+    }
     if (formData.password !== formData.confirmPassword) {
       Alert.alert('Error', 'Passwords do not match');
-      return;
+      return false;
     }
-
     if (!isChecked) {
-      Alert.alert('Error', 'Please agree to the Terms & Privacy');
+      Alert.alert('Error', 'Please agree to the Terms & Privacy Policy');
+      return false;
+    }
+    return true;
+  };
+
+  const handleSignUp = async () => {
+    if (!validateForm()) {
       return;
     }
 
@@ -46,9 +85,17 @@ export default function RiderSignUpScreen() {
       const userData: UserData = {
         email: formData.email,
         password: formData.password,
-        fullName: formData.fullName,
+        firstName: formData.fullName.split(' ')[0] || '',
+        lastName: formData.fullName.split(' ').slice(1).join(' ') || '',
         phoneNumber: formData.phoneNumber,
         licenseNumber: formData.licenseNumber,
+        address: {
+          street: formData.street,
+          city: formData.city,
+          province: formData.province,
+          postalCode: formData.postalCode,
+          country: 'Philippines'
+        },
         role: 'driver'
       };
 
@@ -144,6 +191,50 @@ export default function RiderSignUpScreen() {
             placeholderTextColor="#666666"
             value={formData.licenseNumber}
             onChangeText={(value) => handleInputChange('licenseNumber', value)}
+          />
+        </View>
+        <View style={styles.inputContainer}>
+          <AntDesign name="enviromento" size={20} color="#666666" style={styles.inputIcon} />
+          <TextInput
+            style={styles.input}
+            placeholder="Street Address"
+            placeholderTextColor="#666666"
+            value={formData.street}
+            onChangeText={(value) => handleInputChange('street', value)}
+          />
+        </View>
+
+        <View style={styles.inputContainer}>
+          <AntDesign name="home" size={20} color="#666666" style={styles.inputIcon} />
+          <TextInput
+            style={styles.input}
+            placeholder="City"
+            placeholderTextColor="#666666"
+            value={formData.city}
+            onChangeText={(value) => handleInputChange('city', value)}
+          />
+        </View>
+
+        <View style={styles.inputContainer}>
+          <AntDesign name="flag" size={20} color="#666666" style={styles.inputIcon} />
+          <TextInput
+            style={styles.input}
+            placeholder="Province"
+            placeholderTextColor="#666666"
+            value={formData.province}
+            onChangeText={(value) => handleInputChange('province', value)}
+          />
+        </View>
+
+        <View style={styles.inputContainer}>
+          <AntDesign name="codepen" size={20} color="#666666" style={styles.inputIcon} />
+          <TextInput
+            style={styles.input}
+            placeholder="Postal Code"
+            placeholderTextColor="#666666"
+            keyboardType="numeric"
+            value={formData.postalCode}
+            onChangeText={(value) => handleInputChange('postalCode', value)}
           />
         </View>
 
@@ -331,4 +422,4 @@ const styles = StyleSheet.create({
     padding: 5,
     alignSelf: 'flex-start',
   },
-}); 
+});

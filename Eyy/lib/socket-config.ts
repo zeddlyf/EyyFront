@@ -1,5 +1,6 @@
 import { Manager } from 'socket.io-client';
 import { Platform } from 'react-native';
+import { config, getSocketUrl } from './config';
 
 // Configure Socket.IO to use native WebSocket
 const socketConfig = {
@@ -23,10 +24,12 @@ const socketConfig = {
 };
 
 // Create socket instance
-const createSocket = (url: string) => {
-  // Ensure we're using the correct URL format
-  const serverUrl = url.startsWith('http') ? url : `http://${url}`;
-  const manager = new Manager(serverUrl, socketConfig);
+const createSocket = (url?: string) => {
+  // Use provided URL or fallback to config
+  const serverUrl = url || getSocketUrl();
+  const finalUrl = serverUrl.startsWith('http') ? serverUrl : `http://${serverUrl}`;
+  
+  const manager = new Manager(finalUrl, socketConfig);
   const socket = manager.socket('/');
   
   // Ensure proper initialization

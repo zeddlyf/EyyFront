@@ -1,3 +1,5 @@
+import { dijkstra } from '../lib/Djikstra';
+
 interface Point {
   latitude: number;
   longitude: number;
@@ -435,74 +437,47 @@ class PathFinder {
       return null;
     }
 
-    const startNode = this.nodes[startId];
-    const endNode = this.nodes[endId];
-    const openSet = new Set<string>([startId]);
-    const closedSet = new Set<string>();
-    const cameFrom: { [key: string]: string } = {};
-    const gScore: { [key: string]: number } = { [startId]: 0 };
-    const fScore: { [key: string]: number } = { [startId]: this.heuristic(startNode.point, endNode.point) };
+    return this.findShortestPathDijkstra(startId, endId);
+  }
+
+  // Dijkstra algorithm implementation
+  private findShortestPathDijkstra(startId: string, endId: string): PathResult | null {
+    // Convert graph to format expected by Dijkstra algorithm
+    const graph: { [key: string]: { [key: string]: number } } = {};
     
-    // Use a more efficient priority queue implementation
-    const priorityQueue = new this.PriorityQueue<string>((a: string, b: string) => fScore[a] - fScore[b]);
-    priorityQueue.enqueue(startId);
-
-    // Cache for heuristic values
-    const heuristicCache: { [key: string]: number } = {};
-
-    while (!priorityQueue.isEmpty()) {
-      const currentId = priorityQueue.dequeue()!;
-      
-      if (currentId === endId) {
-        const path = this.reconstructPath(cameFrom, currentId);
-        if (this.validatePath(path)) {
-          // Get detailed path coordinates including intermediate points
-          const detailedPath = this.getDetailedPathCoordinates(path);
-          const distance = this.calculatePathDistance(detailedPath);
-          const estimatedTime = this.calculateEstimatedTime(detailedPath);
-          const fare = this.calculateFare(distance);
-          return { 
-            path, 
-            distance, 
-            estimatedTime, 
-            fare 
-          };
-        }
-        return null;
-      }
-
-      openSet.delete(currentId);
-      closedSet.add(currentId);
-
-      const currentNode = this.nodes[currentId];
-      for (const neighborId in currentNode.neighbors) {
-        if (closedSet.has(neighborId)) continue;
-
-        const tentativeGScore = gScore[currentId] + currentNode.neighbors[neighborId];
-
-        if (!openSet.has(neighborId)) {
-          openSet.add(neighborId);
-        } else if (tentativeGScore >= (gScore[neighborId] || Infinity)) {
-          continue;
-        }
-
-        cameFrom[neighborId] = currentId;
-        gScore[neighborId] = tentativeGScore;
-
-        // Use cached heuristic value if available
-        const cacheKey = `${neighborId}-${endId}`;
-        if (!heuristicCache[cacheKey]) {
-          heuristicCache[cacheKey] = this.heuristic(this.nodes[neighborId].point, endNode.point);
-        }
-        fScore[neighborId] = tentativeGScore + heuristicCache[cacheKey];
-        
-        priorityQueue.enqueue(neighborId);
+    // Build graph from nodes
+    for (const nodeId in this.nodes) {
+      graph[nodeId] = {};
+      for (const neighborId in this.nodes[nodeId].neighbors) {
+        graph[nodeId][neighborId] = this.nodes[nodeId].neighbors[neighborId];
       }
     }
 
-    console.warn('No path found between nodes');
+    // Use Dijkstra algorithm
+    const result = dijkstra(graph, startId, endId);
+
+    if (result && result.path && result.path.length > 0) {
+      const path = result.path;
+      if (this.validatePath(path)) {
+        // Get detailed path coordinates including intermediate points
+        const detailedPath = this.getDetailedPathCoordinates(path);
+        const distance = this.calculatePathDistance(detailedPath);
+        const estimatedTime = this.calculateEstimatedTime(detailedPath);
+        const fare = this.calculateFare(distance);
+        return { 
+          path, 
+          distance, 
+          estimatedTime, 
+          fare 
+        };
+      }
+    }
+
+    console.warn('No path found between nodes using Dijkstra algorithm');
     return null;
   }
+
+
 
   // Get detailed path coordinates including intermediate points
   public getDetailedPathCoordinates(path: string[]): Point[] {

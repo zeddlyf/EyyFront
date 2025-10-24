@@ -1,11 +1,12 @@
-const { getDefaultConfig } = require('@expo/metro-config');
+const { getDefaultConfig } = require('expo/metro-config');
 
-const defaultConfig = getDefaultConfig(__dirname);
+const config = getDefaultConfig(__dirname);
 
-module.exports = {
-  ...defaultConfig,
-  resolver: {
-    ...defaultConfig.resolver,
-    sourceExts: ['jsx', 'js', 'ts', 'tsx', 'json', 'mjs', 'cjs']
-  }
-}; 
+config.resolver.extraNodeModules = {
+  ...config.resolver.extraNodeModules,
+  stream: require.resolve('readable-stream'),
+  buffer: require.resolve('buffer/'),
+  // add other polyfills as needed
+};
+
+module.exports = config; 

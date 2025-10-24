@@ -42,6 +42,35 @@ export default function CommuterLayout() {
           tabBarShowLabel: false,
         }}
       />
+      <Tabs.Screen
+        name="booking"
+        options={{
+          href: null,
+          tabBarStyle: { display: 'none' },
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="book" size={size} color={color} />
+          ),
+          tabBarShowLabel: false,
+        }}
+      />
+      <Tabs.Screen
+        name="menucommuter"
+        options={{
+          href: null,
+          tabBarShowLabel: false,
+          tabBarStyle: { display: 'none' }, 
+        }}
+      />
+      <Tabs.Screen
+        name="editprofilecommuter"
+        options={{
+          href: null,
+          tabBarShowLabel: false,
+          tabBarStyle: { display: 'none' }, 
+        }}
+      />
     </Tabs>
+    
+    
   );
 } 

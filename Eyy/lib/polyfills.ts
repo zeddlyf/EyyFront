@@ -26,25 +26,7 @@ import 'react-native-get-random-values';
 // Import and set up WebSocket
 import './websocket-polyfill';
 
-// Import stream polyfill
-import streamModule from './stream-module';
-
-// Set up stream module with safety checks
-if (typeof (global as any).stream === 'undefined') {
-  const { EventEmitter, Stream, Readable, Writable, Transform, Duplex, PassThrough } = streamModule;
-  
-  // First set up EventEmitter
-  (global as any).EventEmitter = EventEmitter;
-  
-  // Then set up stream components
-  (global as any).stream = streamModule;
-  (global as any).Stream = Stream;
-  (global as any).Readable = Readable;
-  (global as any).Writable = Writable;
-  (global as any).Transform = Transform;
-  (global as any).Duplex = Duplex;
-  (global as any).PassThrough = PassThrough;
-}
+// Stream polyfill removed - not needed for current implementation
 
 // Import and set up crypto
 import crypto from './crypto-polyfill';
@@ -78,7 +60,6 @@ if (typeof (global as any).Buffer === 'undefined') {
 
 // Export all polyfills
 export {
-  streamModule as stream,
   crypto,
   https
 };
