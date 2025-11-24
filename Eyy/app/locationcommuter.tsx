@@ -7,6 +7,7 @@ import * as Location from 'expo-location';
 import { PathFinder, Point } from '../utils/pathfinding';
 import { rideAPI } from '../lib/api';
 import { MaterialIcons } from '@expo/vector-icons';
+import GooglePlacesAutocomplete from '@/utils/GooglePlacesAutocomplete';
 
 interface Location extends Point {
   name?: string;
@@ -738,18 +739,27 @@ const handleChooseDestination = async () => {
           <Ionicons name="close" size={24} color="#fff" />
         </TouchableOpacity>
         <View style={styles.searchContainer}>
-          <Ionicons name="location-outline" size={20} color="#0d4217" />
-          <TextInput
-            style={styles.searchInput}
+          <GooglePlacesAutocomplete
             placeholder="Where do you want to go?"
-            placeholderTextColor="#666"
-            value={searchText}
-            onChangeText={debouncedSearch}
-            returnKeyType="search"
+            onPlaceSelected={(place: any, details: any) => {
+              if (!details?.geometry?.location) return;
+              const loc = details.geometry.location;
+              const address = details.formatted_address || place.description;
+              const newDestination: Location = {
+                latitude: loc.lat,
+                longitude: loc.lng,
+                name: details.name || place.structured_formatting?.main_text,
+                address,
+                timestamp: Date.now(),
+              };
+              setDestination(newDestination);
+              updateMapRegion(newDestination);
+              handleSearch(address);
+            }}
+            minLength={2}
+            language="en"
+            types={"address"}
           />
-          {isLoading && (
-            <ActivityIndicator size="small" color="#0d4217" style={styles.searchLoading} />
-          )}
         </View>
       </View>
 
@@ -1165,4 +1175,4 @@ const styles = StyleSheet.create({
     color: '#999',
     fontFamily: 'monospace',
   },
-}); 
+});

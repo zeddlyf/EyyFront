@@ -477,6 +477,47 @@ class PathFinder {
     return null;
   }
 
+  // Compute K alternative paths by penalizing previously used edges
+  public findAlternativePaths(startId: string, endId: string, k: number = 3): PathResult[] {
+    const results: PathResult[] = [];
+    const penalties: { [key: string]: number } = {};
+
+    for (let i = 0; i < k; i++) {
+      // Build penalized graph
+      const graph: { [key: string]: { [key: string]: number } } = {};
+      for (const nodeId in this.nodes) {
+        graph[nodeId] = {};
+        for (const neighborId in this.nodes[nodeId].neighbors) {
+          const base = this.nodes[nodeId].neighbors[neighborId];
+          const key = `${nodeId}->${neighborId}`;
+          const penalty = penalties[key] || 0;
+          graph[nodeId][neighborId] = base * (1 + penalty);
+        }
+      }
+
+      const result = dijkstra(graph, startId, endId);
+      if (!result || !result.path || result.path.length === 0) break;
+      if (!this.validatePath(result.path)) break;
+
+      const detailedPath = this.getDetailedPathCoordinates(result.path);
+      const distance = this.calculatePathDistance(detailedPath);
+      const estimatedTime = this.calculateEstimatedTime(detailedPath);
+      const fare = this.calculateFare(distance);
+      const pathResult: PathResult = { path: result.path, distance, estimatedTime, fare };
+      results.push(pathResult);
+
+      // Penalize edges used in this path to discover alternatives next iteration
+      for (let j = 0; j < result.path.length - 1; j++) {
+        const a = result.path[j];
+        const b = result.path[j + 1];
+        const key = `${a}->${b}`;
+        penalties[key] = (penalties[key] || 0) + 0.3; // 30% penalty per use
+      }
+    }
+
+    return results;
+  }
+
 
 
   // Get detailed path coordinates including intermediate points
@@ -763,4 +804,4 @@ class PathFinder {
   }
 }
 
-export { PathFinder, Point, GraphNode, PathResult }; 
+export { PathFinder, Point, GraphNode, PathResult };

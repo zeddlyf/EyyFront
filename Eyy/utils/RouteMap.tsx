@@ -65,6 +65,7 @@ function RouteMap({
   const mapRef = useRef<MapView>(null);
   const [route, setRoute] = useState<any>(null);
   const [routeCoordinates, setRouteCoordinates] = useState<any[]>([]);
+  const [routeAlternatives, setRouteAlternatives] = useState<Array<{ coords: any[]; info: any }>>([]);
 
   useEffect(() => {
     if (origin && destination) {
@@ -126,7 +127,8 @@ function RouteMap({
         origin: originStr,
         destination: destinationStr,
         mode: travelMode,
-        alternatives: 'false',
+        alternatives: 'true',
+        departure_time: 'now',
         units: 'metric',
       };
 
@@ -134,13 +136,17 @@ function RouteMap({
       const response = await fetch(url);
       const data = await response.json();
 
-      if (data.status === 'OK' && data.routes && data.routes[0]) {
-        const routeData = data.routes[0];
-        const coordinates = decodePolyline(routeData.overview_polyline.points);
-        
-        setRoute(routeData);
-        setRouteCoordinates(coordinates);
-        onRouteReceived?.(routeData);
+      if (data.status === 'OK' && data.routes && data.routes.length > 0) {
+        const primary = data.routes[0];
+        const primaryCoords = decodePolyline(primary.overview_polyline.points);
+        setRoute(primary);
+        setRouteCoordinates(primaryCoords);
+        const alts = data.routes.slice(0, 3).map((r: any) => ({
+          coords: decodePolyline(r.overview_polyline.points),
+          info: r
+        }));
+        setRouteAlternatives(alts);
+        onRouteReceived?.(data.routes);
       } else {
         // Fallback to OSRM if Google fails
         fetchOSRMRoute();
@@ -284,11 +290,20 @@ function RouteMap({
           <Polyline
             coordinates={routeCoordinates}
             strokeColor="#007AFF"
-            strokeWidth={4}
-            lineDashPattern={[1]}
+            strokeWidth={5}
             geodesic={true}
           />
         )}
+        {routeAlternatives.map((alt, idx) => (
+          <Polyline
+            key={`alt-${idx}`}
+            coordinates={alt.coords}
+            strokeColor={idx === 0 ? '#10b981' : '#9ca3af'}
+            strokeWidth={3}
+            lineDashPattern={[4]}
+            geodesic={true}
+          />
+        ))}
       </MapView>
     </View>
   );

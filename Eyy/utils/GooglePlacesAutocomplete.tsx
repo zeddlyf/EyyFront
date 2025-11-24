@@ -53,13 +53,14 @@ const GooglePlacesAutocomplete: React.FC<GooglePlacesAutocompleteProps> = ({
   minLength = 2,
   query = '',
   onQueryChange,
-  types = PLACE_TYPES.GEOCODE,
+  types = PLACE_TYPES.ADDRESS,
   country = 'PH', // Philippines
   language = 'en',
 }) => {
   const [predictions, setPredictions] = useState<Place[]>([]);
   const [loading, setLoading] = useState(false);
   const [inputValue, setInputValue] = useState(query);
+  const cacheRef = React.useRef<Map<string, Place[]>>(new Map());
 
   const searchPlaces = async (text: string) => {
     if (text.length < minLength) {
@@ -69,6 +70,12 @@ const GooglePlacesAutocomplete: React.FC<GooglePlacesAutocompleteProps> = ({
 
     setLoading(true);
     try {
+      const cached = cacheRef.current.get(text.toLowerCase());
+      if (cached) {
+        setPredictions(cached);
+        setLoading(false);
+        return;
+      }
       const params = {
         input: text,
         types: types,
@@ -81,7 +88,16 @@ const GooglePlacesAutocomplete: React.FC<GooglePlacesAutocompleteProps> = ({
       const data = await response.json();
 
       if (data.predictions) {
-        setPredictions(data.predictions);
+        // Basic fuzzy matching and limit
+        const norm = text.toLowerCase();
+        const list = (data.predictions as Place[])
+          .filter(p => (
+            p.structured_formatting?.main_text?.toLowerCase().includes(norm) ||
+            p.description?.toLowerCase().includes(norm)
+          ))
+          .slice(0, 8);
+        setPredictions(list);
+        cacheRef.current.set(text.toLowerCase(), list);
       } else {
         setPredictions([]);
       }
@@ -97,7 +113,7 @@ const GooglePlacesAutocomplete: React.FC<GooglePlacesAutocompleteProps> = ({
     try {
       const params = {
         place_id: placeId,
-        fields: 'geometry,formatted_address,name',
+        fields: 'geometry,formatted_address,name,address_components',
       };
 
       const url = buildGoogleMapsUrl(GOOGLE_MAPS_ENDPOINTS.PLACE_DETAILS, params);
@@ -115,8 +131,9 @@ const GooglePlacesAutocomplete: React.FC<GooglePlacesAutocompleteProps> = ({
 
   const handlePlaceSelect = async (place: Place) => {
     const details = await getPlaceDetails(place.place_id);
-    onPlaceSelected(place, details);
-    setInputValue(place.description);
+    const formatted = details?.formatted_address || place.description;
+    onPlaceSelected({ ...place, description: formatted } as Place, details);
+    setInputValue(formatted);
     setPredictions([]);
   };
 
@@ -254,4 +271,4 @@ const styles = StyleSheet.create({
   },
 });
 
-export default GooglePlacesAutocomplete; 
+export default GooglePlacesAutocomplete;

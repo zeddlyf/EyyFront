@@ -54,7 +54,17 @@ api.interceptors.response.use(
     
     // Handle network errors (no response received)
     if (!error.response) {
-      console.error('Axios Network Error:', error.message, error.toJSON()); // Log more details
+      try {
+        const cfg: any = error.config || {};
+        if (!cfg.__retryOnFallback) {
+          const working = await apiUtils.findWorkingServer();
+          if (working) {
+            api.defaults.baseURL = working;
+            const newConfig: any = { ...cfg, baseURL: working, __retryOnFallback: true };
+            return api.request(newConfig);
+          }
+        }
+      } catch {}
       return Promise.reject(new Error('Network error. Please check your internet connection and make sure the server is running.'));
     }
     
@@ -448,4 +458,4 @@ const apiUtils = {
 export { authAPI, userAPI, rideAPI, walletAPI, paymentAPI, apiUtils };
 export type { UserData, AuthResponse, UserProfile, Address };
 
-export default api; 
+export default api;

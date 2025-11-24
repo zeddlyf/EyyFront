@@ -4,6 +4,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import MapView, { Marker, PROVIDER_GOOGLE } from 'react-native-maps';
 import * as Location from 'expo-location';
+import { useSocket } from '../../lib/socket-context';
+import { userAPI } from '../../lib/api';
 
 interface Location {
   latitude: number;
@@ -12,6 +14,7 @@ interface Location {
 
 export default function DashboardCommuter() {
   const router = useRouter();
+  const { socket, isConnected } = useSocket();
   const mapRef = useRef<MapView>(null);
   const [currentLocation, setCurrentLocation] = useState<Location>({
     latitude: 13.6195,
@@ -27,6 +30,7 @@ export default function DashboardCommuter() {
   });
   const pulseAnim = useRef(new Animated.Value(1)).current;
   const locationSubscription = useRef<Location.LocationSubscription | null>(null);
+  const [activeDrivers, setActiveDrivers] = useState<any[]>([]);
 
   const startPulseAnimation = () => {
     Animated.loop(
@@ -109,10 +113,39 @@ export default function DashboardCommuter() {
     getCurrentLocation();
     startPulseAnimation();
 
+    // Initial load of active drivers
+    (async () => {
+      try {
+        const drivers = await userAPI.getNearbyDrivers(currentLocation.latitude, currentLocation.longitude, 20000);
+        setActiveDrivers(drivers);
+      } catch (err) {}
+    })();
+
+    // Socket updates for driver locations
+    if (socket) {
+      socket.on('driverLocationChanged', (payload: any) => {
+        const { driverId, location, status } = payload;
+        setActiveDrivers((prev) => {
+          const idx = prev.findIndex((d: any) => d._id === driverId);
+          if (idx >= 0) {
+            const updated = [...prev];
+            updated[idx] = {
+              ...updated[idx],
+              location: { type: 'Point', coordinates: [location.longitude, location.latitude] },
+              isAvailable: status !== 'on-trip'
+            };
+            return updated;
+          }
+          return prev;
+        });
+      });
+    }
+
     return () => {
       if (locationSubscription.current) {
         locationSubscription.current.remove();
       }
+      if (socket) socket.off('driverLocationChanged');
     };
   }, []);
 
@@ -160,6 +193,20 @@ export default function DashboardCommuter() {
               <Ionicons name="location" size={30} color="#0d4217" />
             </Animated.View>
           </Marker>
+
+          {/* Active drivers markers */}
+          {activeDrivers.map((driver: any) => (
+            <Marker
+              key={driver._id}
+              coordinate={{
+                latitude: driver.location.coordinates[1],
+                longitude: driver.location.coordinates[0]
+              }}
+              title={`${driver.firstName} ${driver.lastName}`}
+              description={driver.isAvailable ? 'Available' : 'On trip'}
+              pinColor={driver.isAvailable ? '#3B82F6' : '#FF6B35'}
+            />
+          ))}
         </MapView>
 
         {/* Recenter Button */}
@@ -269,4 +316,4 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: 'bold',
   },
-}); 
+});

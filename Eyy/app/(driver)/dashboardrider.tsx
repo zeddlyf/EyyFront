@@ -5,6 +5,7 @@ import { Link, useRouter } from 'expo-router';
 import MapView, { Marker, PROVIDER_GOOGLE, Callout, Polyline } from 'react-native-maps';
 import * as Location from 'expo-location';
 import { rideAPI, userAPI } from '../../lib/api';
+import { useSocket } from '../../lib/socket-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { GOOGLE_MAPS_ENDPOINTS, buildGoogleMapsUrl, TRAVEL_MODES } from '../../lib/google-maps-config';
 import { RouteMap } from '../../utils/RouteMap';
@@ -56,6 +57,7 @@ interface RouteInfo {
 
 export default function DashboardRider() {
   const router = useRouter();
+  const { socket, isConnected } = useSocket();
   const [isAvailable, setIsAvailable] = useState(false);
   const mapRef = useRef<MapView>(null);
   const [currentLocation, setCurrentLocation] = useState<Location>({
@@ -69,6 +71,7 @@ export default function DashboardRider() {
   const [acceptedRide, setAcceptedRide] = useState<RideRequest | null>(null);
   const [routeCoordinates, setRouteCoordinates] = useState<any[]>([]);
   const [routeInfo, setRouteInfo] = useState<RouteInfo | null>(null);
+  const [routeAlternatives, setRouteAlternatives] = useState<any[]>([]);
   const [isNavigating, setIsNavigating] = useState(false);
   const [region, setRegion] = useState({
     latitude: 13.6195,
@@ -79,6 +82,7 @@ export default function DashboardRider() {
   const [pathFinder, setPathFinder] = useState<PathFinder | null>(null);
   const [isPathFinderInitialized, setIsPathFinderInitialized] = useState(false);
   const [navigationMode, setNavigationMode] = useState<'google' | 'pathfinder'>('google');
+  const [driverId, setDriverId] = useState<string | null>(null);
 
   const initializePathFinder = async (location: Location) => {
     try {
@@ -128,6 +132,21 @@ export default function DashboardRider() {
       
       // Initialize PathFinder with current location
       await initializePathFinder(newLocation);
+      // Emit immediate location update if connected
+      if (socket && isConnected && driverId) {
+        socket.emit('driverLocationUpdate', {
+          driverId: driverId,
+          location: { latitude: newLocation.latitude, longitude: newLocation.longitude },
+          rideId: acceptedRide?._id || acceptedRide?.id || null,
+          hasPassenger: !!acceptedRide,
+          status: isNavigating ? 'on-trip' : 'available'
+        });
+      } else {
+        // REST fallback
+        try {
+          await userAPI.updateDriverLocation(newLocation.latitude, newLocation.longitude);
+        } catch {}
+      }
     } catch (error) {
       console.error('Error getting location:', error);
       Alert.alert('Error', 'Failed to get your current location. Please try again.');
@@ -135,6 +154,55 @@ export default function DashboardRider() {
       setIsLoading(false);
     }
   };
+
+  // Continuous location tracking and socket emission
+  useEffect(() => {
+    let locationSubscription: Location.LocationSubscription | null = null;
+    let interval: NodeJS.Timeout | null = null;
+    const startTracking = async () => {
+      try {
+        const { status } = await Location.requestForegroundPermissionsAsync();
+        if (status !== 'granted') return;
+        locationSubscription = await Location.watchPositionAsync({
+          accuracy: Location.Accuracy.Balanced,
+          timeInterval: 1000,
+          distanceInterval: 1,
+        }, async (loc) => {
+          const newLoc = { latitude: loc.coords.latitude, longitude: loc.coords.longitude };
+          setCurrentLocation(newLoc);
+          if (socket && isConnected && driverId) {
+            socket.emit('driverLocationUpdate', {
+              driverId: driverId,
+              location: { latitude: newLoc.latitude, longitude: newLoc.longitude },
+              rideId: acceptedRide?._id || acceptedRide?.id || null,
+              hasPassenger: !!acceptedRide,
+              status: isNavigating ? 'on-trip' : 'available'
+            });
+          } else {
+            try { await userAPI.updateDriverLocation(newLoc.latitude, newLoc.longitude); } catch {}
+          }
+        });
+        // Extra safety emission at 2s cadence
+        interval = setInterval(async () => {
+          if (!currentLocation) return;
+          if (socket && isConnected && driverId) {
+            socket.emit('driverLocationUpdate', {
+              driverId: driverId,
+              location: { latitude: currentLocation.latitude, longitude: currentLocation.longitude },
+              rideId: acceptedRide?._id || acceptedRide?.id || null,
+              hasPassenger: !!acceptedRide,
+              status: isNavigating ? 'on-trip' : 'available'
+            });
+          }
+        }, 2000);
+      } catch {}
+    };
+    if (isAvailable) startTracking();
+    return () => {
+      if (locationSubscription) locationSubscription.remove();
+      if (interval) clearInterval(interval);
+    };
+  }, [isAvailable, isConnected, socket, acceptedRide, isNavigating]);
 
   const fetchRoute = async (origin: Location, destination: Location) => {
     try {
@@ -408,19 +476,27 @@ export default function DashboardRider() {
   };
 
   const toggleAvailability = async () => {
+    const prev = isAvailable;
+    const next = !prev;
+    setIsAvailable(next);
     try {
-      const newAvailability = !isAvailable;
-      setIsAvailable(newAvailability);
-      await userAPI.updateDriverAvailability(newAvailability);
-      if (newAvailability) {
+      await userAPI.updateDriverAvailability(next);
+      if (next) {
         fetchRideRequests();
       } else {
         setRideRequests([]);
       }
-    } catch (error) {
-      Alert.alert('Error', 'Failed to update availability. Please try again.');
-      // Optionally revert UI if backend fails
-      setIsAvailable(isAvailable);
+    } catch (e: any) {
+      const msg = e?.message?.toLowerCase() || '';
+      if (msg.includes('not approved')) {
+        Alert.alert('Driver not approved', 'Please wait for admin approval before going online. You can go offline anytime.');
+      } else if (msg.includes('authenticate')) {
+        Alert.alert('Session expired', 'Please log in again.');
+        router.replace('/loginrider');
+      } else {
+        Alert.alert('Error', 'Failed to update availability. Please try again.');
+      }
+      setIsAvailable(prev);
     }
   };
 
@@ -479,6 +555,7 @@ export default function DashboardRider() {
       try {
         const user = await userAPI.getProfile();
         setIsAvailable(!!user.isAvailable);
+        setDriverId(user._id);
       } catch (error) {
         console.error('Error fetching user profile:', error);
       }
@@ -542,7 +619,13 @@ export default function DashboardRider() {
               showRouteInfo={true}
               onRouteReceived={(route) => {
                 console.log('Route received from RouteMap:', route);
-                setRouteInfo(route);
+                if (Array.isArray(route)) {
+                  setRouteAlternatives(route);
+                  const primary = route[0];
+                  setRouteInfo(primary);
+                } else {
+                  setRouteInfo(route);
+                }
               }}
               style={styles.map}
               showMyLocationButton={false}
@@ -616,6 +699,16 @@ export default function DashboardRider() {
               <Text style={styles.routeInfo}>
                 {routeInfo.legs?.[0]?.distance?.text} • {routeInfo.legs?.[0]?.duration?.text}
               </Text>
+              {routeAlternatives.length > 1 && (
+                <View style={{ marginTop: 6 }}>
+                  <Text style={{ color: '#666' }}>Alternatives:</Text>
+                  {routeAlternatives.slice(0,3).map((r: any, idx: number) => (
+                    <Text key={`alt-${idx}`} style={{ color: '#666' }}>
+                      • {r.legs?.[0]?.distance?.text} • {r.legs?.[0]?.duration_in_traffic?.text || r.legs?.[0]?.duration?.text}
+                    </Text>
+                  ))}
+                </View>
+              )}
             </View>
           )}
         </View>

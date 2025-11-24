@@ -1,4 +1,5 @@
 import { StyleSheet, Text, View, TextInput, TouchableOpacity, Image, ScrollView, Alert, ActivityIndicator } from 'react-native';
+import AddressForm from '../components/AddressForm';
 import { useRouter } from 'expo-router';
 import { AntDesign } from '@expo/vector-icons';
 import { useState } from 'react';
@@ -14,10 +15,7 @@ export default function RiderSignUpScreen() {
     fullName: '',
     email: '',
     phoneNumber: '',
-    street: '',
-    city: '',
-    province: '',
-    postalCode: '',
+    address: { street: '', barangay: '', city: '', province: '', postalCode: '' },
     password: '',
     confirmPassword: '',
     licenseNumber: '',
@@ -90,10 +88,11 @@ export default function RiderSignUpScreen() {
         phoneNumber: formData.phoneNumber,
         licenseNumber: formData.licenseNumber,
         address: {
-          street: formData.street,
-          city: formData.city,
-          province: formData.province,
-          postalCode: formData.postalCode,
+          street: formData.address.street,
+          barangay: formData.address.barangay,
+          city: formData.address.city,
+          province: formData.address.province,
+          postalCode: formData.address.postalCode,
           country: 'Philippines'
         },
         role: 'driver'
@@ -193,50 +192,11 @@ export default function RiderSignUpScreen() {
             onChangeText={(value) => handleInputChange('licenseNumber', value)}
           />
         </View>
-        <View style={styles.inputContainer}>
-          <AntDesign name="enviromento" size={20} color="#666666" style={styles.inputIcon} />
-          <TextInput
-            style={styles.input}
-            placeholder="Street Address"
-            placeholderTextColor="#666666"
-            value={formData.street}
-            onChangeText={(value) => handleInputChange('street', value)}
-          />
-        </View>
-
-        <View style={styles.inputContainer}>
-          <AntDesign name="home" size={20} color="#666666" style={styles.inputIcon} />
-          <TextInput
-            style={styles.input}
-            placeholder="City"
-            placeholderTextColor="#666666"
-            value={formData.city}
-            onChangeText={(value) => handleInputChange('city', value)}
-          />
-        </View>
-
-        <View style={styles.inputContainer}>
-          <AntDesign name="flag" size={20} color="#666666" style={styles.inputIcon} />
-          <TextInput
-            style={styles.input}
-            placeholder="Province"
-            placeholderTextColor="#666666"
-            value={formData.province}
-            onChangeText={(value) => handleInputChange('province', value)}
-          />
-        </View>
-
-        <View style={styles.inputContainer}>
-          <AntDesign name="codepen" size={20} color="#666666" style={styles.inputIcon} />
-          <TextInput
-            style={styles.input}
-            placeholder="Postal Code"
-            placeholderTextColor="#666666"
-            keyboardType="numeric"
-            value={formData.postalCode}
-            onChangeText={(value) => handleInputChange('postalCode', value)}
-          />
-        </View>
+        <AddressForm
+          value={formData.address}
+          onChange={(addr) => setFormData(prev => ({ ...prev, address: addr }))}
+          accessibilityPrefix="Registration"
+        />
 
         <View style={styles.inputContainer}>
           <AntDesign name="lock" size={20} color="#666666" style={styles.inputIcon} />

@@ -1,7 +1,6 @@
 // Google Maps API Configuration
-// Replace 'YOUR_GOOGLE_MAPS_API_KEY' with your actual API key
-
-export const GOOGLE_MAPS_API_KEY = 'AIzaSyCv62Aspv5ayOJuzYl4MqhQxjy_ddqb2oc';
+import { getGoogleMapsApiKey } from './config';
+const GOOGLE_MAPS_API_KEY = getGoogleMapsApiKey();
 
 // Google Maps API endpoints
 export const GOOGLE_MAPS_ENDPOINTS = {
@@ -66,4 +65,4 @@ export const getCurrentLocation = (): Promise<{ latitude: number; longitude: num
       }
     );
   });
-}; 
+};

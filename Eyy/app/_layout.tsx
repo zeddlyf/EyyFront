@@ -4,6 +4,10 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { AuthProvider } from '../lib/AuthContext';
 import { SocketProvider } from '../lib/socket-context';
+import * as Notifications from 'expo-notifications';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import api from '../lib/api';
+import Constants from 'expo-constants';
 
 // Import polyfills first
 import 'react-native-url-polyfill/auto';
@@ -12,6 +16,27 @@ import '../lib/polyfills';
 
 function RootLayout() {
   const colorScheme = useColorScheme();
+  React.useEffect(() => {
+    (async () => {
+      // Skip remote push token registration in Expo Go; only supports development builds
+      if ((Constants as any).executionEnvironment === 'storeClient') {
+        return;
+      }
+      const { status } = await Notifications.getPermissionsAsync();
+      let granted = status === 'granted';
+      if (!granted) {
+        const req = await Notifications.requestPermissionsAsync();
+        granted = req.status === 'granted';
+      }
+      if (granted) {
+        try {
+          const token = (await Notifications.getExpoPushTokenAsync()).data;
+          try { await api.makeRequest('/notifications/push-token', { method: 'POST', body: JSON.stringify({ token }) }); } catch {}
+          await AsyncStorage.setItem('pushToken', token);
+        } catch {}
+      }
+    })();
+  }, []);
 
   return (
     <AuthProvider>

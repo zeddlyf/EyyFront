@@ -31,12 +31,12 @@ interface TurnInfo {
   distance: number;
 }
 
-// Naga City boundaries
+// Naga City boundaries (slightly expanded)
 const NAGA_CITY_BOUNDS = {
-  north: 13.6500, // Northern boundary
-  south: 13.5800, // Southern boundary
-  east: 123.2000,  // Eastern boundary
-  west: 123.1500,  // Western boundary
+  north: 13.6700,
+  south: 13.5600,
+  east: 123.2200,
+  west: 123.1400,
 };
 
 // Naga City center coordinates
@@ -153,45 +153,46 @@ export default function LocationCommuter() {
   // Initialize pathfinder with OpenStreetMap data
  
   const handleSearch = async (query: string) => {
-  try {
+    const q = query.trim();
+    if (q.length < 3) {
+      setSearchError(null);
+      return;
+    }
     setIsLoading(true);
     setSearchError(null);
-
-    const results = await searchLocation(query);
-    if (!results || results.length === 0) throw new Error('No results found');
-
-    const validResult = results.find(result =>
-      isWithinNagaCity({
-        latitude: result.lat,
-        longitude: result.lon,
-      } as Location)
-    );
-    if (!validResult) {
-      throw new Error("No destinations found within Naga City.");
+    const results = await searchLocation(q);
+    if (!results || results.length === 0) {
+      setSearchError(null);
+      setIsLoading(false);
+      return;
     }
-
+    const within = results.filter(r => isWithinNagaCity({ latitude: r.lat, longitude: r.lon } as Location));
+    const validResult = within.length > 0
+      ? within.sort((a, b) => calculateDistance(
+          { latitude: a.lat, longitude: a.lon } as Location,
+          currentLocation
+        ) - calculateDistance(
+          { latitude: b.lat, longitude: b.lon } as Location,
+          currentLocation
+        ))[0]
+      : null;
+    if (!validResult) {
+      setSearchError(null);
+      setIsLoading(false);
+      return;
+    }
     const newDestination: Location = {
-      latitude: validResult.lat,           // ✅ Use the filtered valid result
+      latitude: validResult.lat,
       longitude: validResult.lon,
       name: validResult.display_name,
       address: validResult.display_name,
       timestamp: Date.now(),
     };
-
     setDestination(newDestination);
-    setMapTappedLocation(null); // Clear map tapped location when searching
+    setMapTappedLocation(null);
     updateMapRegion(newDestination);
-
-    // No pathFinder logic here
-
-  } catch (error) {
-    console.error('Search error:', error);
-    setSearchError('Failed to find destination or route.');
-    setDestination(null);
-  } finally {
     setIsLoading(false);
-  }
-};
+  };
 
 
 
@@ -566,17 +567,17 @@ const handleChooseDestination = async () => {
         return [];
       }
 
-      const response = await fetch(
-        `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(
-          query
-        )}&countrycodes=ph&limit=5`,
-        {
-          headers: {
-            'Accept': 'application/json',
-            'User-Agent': 'EyyRideSharing/1.0', // Required by Nominatim usage policy
-          },
-        }
-      );
+      const viewbox = `${NAGA_CITY_BOUNDS.west},${NAGA_CITY_BOUNDS.south},${NAGA_CITY_BOUNDS.east},${NAGA_CITY_BOUNDS.north}`;
+      const qEnhanced = `${query} Naga City`;
+      const url = `https://nominatim.openstreetmap.org/search?format=json&countrycodes=ph&limit=10` +
+                  `&q=${encodeURIComponent(qEnhanced)}` +
+                  `&viewbox=${viewbox}&bounded=1&addressdetails=1`;
+      const response = await fetch(url, {
+        headers: {
+          'Accept': 'application/json',
+          'User-Agent': 'EyyRideSharing/1.0',
+        },
+      });
 
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
@@ -598,10 +599,8 @@ const handleChooseDestination = async () => {
         lon: parseFloat(item.lon),
         display_name: item.display_name
       }));
-    } catch (error) {
-      console.error('Error searching location:', error);
-      setSearchError('Failed to search location. Please try again.');
-      throw error;
+    } catch {
+      return [];
     }
   };
 
@@ -802,7 +801,7 @@ const handleChooseDestination = async () => {
       return;
     }
     try {
-      await rideAPI.updateRideStatus(rideId as string, 'cancel');
+      await rideAPI.updateRideStatus(rideId as string, 'cancelled');
       Alert.alert('Ride Cancelled', 'Your ride has been cancelled.');
       // Optionally, navigate back to dashboard or reset state
       router.replace('/dashboardcommuter');
@@ -1908,4 +1907,4 @@ const styles = StyleSheet.create({
     color: '#0d4217',
     fontWeight: 'bold',
   },
-}); 
+});
