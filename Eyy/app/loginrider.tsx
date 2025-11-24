@@ -27,7 +27,7 @@ export default function LoginRiderScreen() {
       
       // Navigate based on user role
       if (response.user.role === 'driver') {
-        router.replace('/dashboardrider');
+        router.replace('/(driver)/dashboardrider');
       } else {
         Alert.alert('Error', 'This login is for drivers only');
       }

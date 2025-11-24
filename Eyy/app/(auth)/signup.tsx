@@ -40,12 +40,20 @@ export default function SignupScreen() {
       Alert.alert('Error', 'Please enter your phone number');
       return false;
     }
+    if (!/^\+?[\d\s\-\(\)]+$/.test(formData.phoneNumber.trim())) {
+      Alert.alert('Error', 'Please enter a valid phone number');
+      return false;
+    }
     if (!formData.password) {
       Alert.alert('Error', 'Please enter a password');
       return false;
     }
     if (formData.password.length < 6) {
       Alert.alert('Error', 'Password must be at least 6 characters long');
+      return false;
+    }
+    if (!/(?=.*[a-z])(?=.*[A-Z])(?=.*\d)/.test(formData.password)) {
+      Alert.alert('Error', 'Password must contain at least one uppercase letter, one lowercase letter, and one number');
       return false;
     }
     if (formData.password !== formData.confirmPassword) {

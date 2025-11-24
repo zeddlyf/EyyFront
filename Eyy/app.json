@@ -1,33 +1,80 @@
 {
   "expo": {
     "name": "EyyTrike",
-    "slug": "eyytrike",
+    "slug": "EyyTrike",
     "version": "1.0.0",
+    "sdkVersion": "54.0.0",
+    "icon": "./assets/images/EyyTrikeLogo2.png",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
     "scheme": "eyytrike",
     "splash": {
       "resizeMode": "contain",
-      "backgroundColor": "#0B4619"
+      "image": "./assets/images/EyyTrikeLogo2.png",
+      "backgroundColor": "#0d4217"
     },
     "assetBundlePatterns": [
       "**/*"
     ],
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.anonymous.eyytrike",
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "This app needs access to location to provide navigation and location-based services.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "This app needs access to location to provide navigation and location-based services."
+      }
     },
     "android": {
       "adaptiveIcon": {
-        "backgroundColor": "#0B4619"
+        "backgroundColor": "#0B4619",
+        "foregroundImage": "./assets/images/eyytrike1.png"
       },
-      "package": "com.anonymous.eyytrike"
+      "package": "com.anonymous.eyytrike",
+      "permissions": [
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_BACKGROUND_LOCATION",
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION"
+      ],
+      "config": {
+        "googleMaps": {
+          "apiKey": "YOUR_ANDROID_GOOGLE_MAPS_API_KEY"
+        }
+      }
     },
     "web": {
       "favicon": "./assets/favicon.png"
     },
+    "plugins": [
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "Allow EyyTrike to use your location to provide navigation and location-based services."
+        }
+      ],
+      "expo-font",
+      "expo-router",
+      "expo-web-browser"
+    ],
     "extra": {
-      "serverUrl": "http://localhost:3000",
-      "apiUrl": "http://localhost:3000/api"
-    }
+      "serverUrl": "http://192.168.1.6:3000",
+      "apiUrl": "http://192.168.1.6:3000/api",
+      "socketUrl": "http://192.168.1.6:3000",
+      "googleMapsApiKey": "YOUR_GOOGLE_MAPS_API_KEY",
+      "fallbackUrls": [
+        "http://192.168.1.6:3000",
+        "http://127.0.0.1:3000",
+        "http://192.168.1.6:3000",
+        "http://127.0.0.1:3000"
+      ],
+      "mongodbUri": "mongodb://localhost:27017/eyytrike",
+      "jwtSecret": "your-super-secret-jwt-key-here",
+      "router": {},
+      "eas": {
+        "projectId": "02768acf-8d07-4b69-a7d4-42ce45b4b450"
+      }
+    },
+    "owner": "zeddlyf"
   }
 }

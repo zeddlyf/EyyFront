@@ -1,10 +1,11 @@
 import { StyleSheet, Text, View, TextInput, TouchableOpacity, Image, ScrollView, Alert, ActivityIndicator } from 'react-native';
+import AddressForm from '../components/AddressForm';
 import { useRouter } from 'expo-router';
 import { AntDesign } from '@expo/vector-icons';
 import { useState } from 'react';
 import { authAPI, UserData } from '../lib/api';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import api from '../lib/api'; // Import the default export (axios instance)
+import api, { API_URL } from '../lib/api';
 
 export default function RiderSignUpScreen() {
   const router = useRouter();
@@ -14,29 +15,66 @@ export default function RiderSignUpScreen() {
     fullName: '',
     email: '',
     phoneNumber: '',
-    licenseNumber: '',
+    address: { street: '', barangay: '', city: '', province: '', postalCode: '' },
     password: '',
     confirmPassword: '',
+    licenseNumber: '',
   });
 
   const handleInputChange = (field: string, value: string) => {
     setFormData(prev => ({ ...prev, [field]: value }));
   };
 
-  const handleSignUp = async () => {
-    // Validate form
-    if (!formData.fullName || !formData.email || !formData.phoneNumber || !formData.licenseNumber || !formData.password || !formData.confirmPassword) {
-      Alert.alert('Error', 'Please fill in all fields');
-      return;
+  const validateForm = () => {
+    if (!formData.fullName.trim()) {
+      Alert.alert('Error', 'Please enter your full name');
+      return false;
     }
-
+    if (!formData.email.trim()) {
+      Alert.alert('Error', 'Please enter your email');
+      return false;
+    }
+    if (!/\S+@\S+\.\S+/.test(formData.email)) {
+      Alert.alert('Error', 'Please enter a valid email address');
+      return false;
+    }
+    if (!formData.phoneNumber.trim()) {
+      Alert.alert('Error', 'Please enter your phone number');
+      return false;
+    }
+    if (!/^\+?[\d\s\-\(\)]+$/.test(formData.phoneNumber.trim())) {
+      Alert.alert('Error', 'Please enter a valid phone number');
+      return false;
+    }
+    if (!formData.licenseNumber.trim()) {
+      Alert.alert('Error', 'Please enter your license number');
+      return false;
+    }
+    if (!formData.password) {
+      Alert.alert('Error', 'Please enter a password');
+      return false;
+    }
+    if (formData.password.length < 6) {
+      Alert.alert('Error', 'Password must be at least 6 characters long');
+      return false;
+    }
+    if (!/(?=.*[a-z])(?=.*[A-Z])(?=.*\d)/.test(formData.password)) {
+      Alert.alert('Error', 'Password must contain at least one uppercase letter, one lowercase letter, and one number');
+      return false;
+    }
     if (formData.password !== formData.confirmPassword) {
       Alert.alert('Error', 'Passwords do not match');
-      return;
+      return false;
     }
-
     if (!isChecked) {
-      Alert.alert('Error', 'Please agree to the Terms & Privacy');
+      Alert.alert('Error', 'Please agree to the Terms & Privacy Policy');
+      return false;
+    }
+    return true;
+  };
+
+  const handleSignUp = async () => {
+    if (!validateForm()) {
       return;
     }
 
@@ -45,13 +83,22 @@ export default function RiderSignUpScreen() {
       const userData: UserData = {
         email: formData.email,
         password: formData.password,
-        fullName: formData.fullName,
+        firstName: formData.fullName.split(' ')[0] || '',
+        lastName: formData.fullName.split(' ').slice(1).join(' ') || '',
         phoneNumber: formData.phoneNumber,
         licenseNumber: formData.licenseNumber,
+        address: {
+          street: formData.address.street,
+          barangay: formData.address.barangay,
+          city: formData.address.city,
+          province: formData.address.province,
+          postalCode: formData.address.postalCode,
+          country: 'Philippines'
+        },
         role: 'driver'
       };
 
-      console.log('Attempting signup with URL:', api.baseURL + '/api/auth/register', 'and data:', userData);
+      console.log('Attempting signup with URL:', API_URL + '/api/auth/register', 'and data:', userData);
       const response = await authAPI.register(userData);
 
       // Store the token and user data
@@ -83,10 +130,8 @@ export default function RiderSignUpScreen() {
         <View style={styles.headerContainer}>
           {/* Title */}
           <View style={styles.titleContainer}>
-            <Text style={styles.title}>Let's</Text>
-            <Text style={styles.titleBold}>Create</Text>
-            <Text style={styles.titleBold}>Your</Text>
-            <Text style={styles.titleBold}>Account</Text>
+            <Text style={styles.title}>Become a</Text>
+            <Text style={styles.titleBold}>Rider</Text>
           </View>
 
           {/* Close Button */}
@@ -141,12 +186,17 @@ export default function RiderSignUpScreen() {
           <AntDesign name="idcard" size={20} color="#666666" style={styles.inputIcon} />
           <TextInput
             style={styles.input}
-            placeholder="Driver's License number"
+            placeholder="License Number"
             placeholderTextColor="#666666"
             value={formData.licenseNumber}
             onChangeText={(value) => handleInputChange('licenseNumber', value)}
           />
         </View>
+        <AddressForm
+          value={formData.address}
+          onChange={(addr) => setFormData(prev => ({ ...prev, address: addr }))}
+          accessibilityPrefix="Registration"
+        />
 
         <View style={styles.inputContainer}>
           <AntDesign name="lock" size={20} color="#666666" style={styles.inputIcon} />
@@ -194,7 +244,7 @@ export default function RiderSignUpScreen() {
           {isLoading ? (
             <ActivityIndicator color="#ffffff" />
           ) : (
-            <Text style={styles.signUpButtonText}>Sign Up</Text>
+            <Text style={styles.signUpButtonText}>Sign Up as Rider</Text>
           )}
         </TouchableOpacity>
 
@@ -332,4 +382,4 @@ const styles = StyleSheet.create({
     padding: 5,
     alignSelf: 'flex-start',
   },
-}); 
+});

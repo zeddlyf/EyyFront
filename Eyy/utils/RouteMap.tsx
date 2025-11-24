@@ -1,437 +1,331 @@
-import { dijkstra } from './dijkstra'; // Import the dijkstra function
+import { useEffect, useRef, useState } from 'react';
+import { View, StyleSheet } from 'react-native';
+import { MapPin } from 'lucide-react-native';
+import MapView, { Marker, Polyline, PROVIDER_GOOGLE, PROVIDER_DEFAULT } from 'react-native-maps';
+import { GOOGLE_MAPS_ENDPOINTS, buildGoogleMapsUrl, TRAVEL_MODES } from '../lib/google-maps-config';
+import { Ionicons } from '@expo/vector-icons';
 
-export interface Point {
-  latitude: number;
-  longitude: number;
+interface RouteMapProps {
+  origin: {
+    latitude: number;
+    longitude: number;
+    address: string;
+  };
+  destination: {
+    latitude: number;
+    longitude: number;
+    address: string;
+  };
+  travelMode?: string;
+  showRouteInfo?: boolean;
+  onRouteReceived?: (route: any) => void;
+  style?: any;
+  additionalMarkers?: Array<{
+    coordinate: {
+      latitude: number;
+      longitude: number;
+    };
+    title: string;
+    description: string;
+    pinColor?: string;
+    icon?: string;
+    onPress?: () => void;
+  }>;
+  showUserLocation?: boolean;
+  showMyLocationButton?: boolean;
+  showCompass?: boolean;
+  showScale?: boolean;
+  showTraffic?: boolean;
+  showBuildings?: boolean;
+  showIndoors?: boolean;
+  mapType?: 'standard' | 'satellite' | 'hybrid';
+  useDijkstra?: boolean;
+  pathFinder?: any;
 }
 
-interface Node {
-  id: string;
-  point: Point;
-  neighbors: string[];
-}
+function RouteMap({ 
+  origin, 
+  destination, 
+  travelMode = TRAVEL_MODES.DRIVING,
+  showRouteInfo = true,
+  onRouteReceived,
+  style,
+  additionalMarkers = [],
+  showUserLocation = true,
+  showMyLocationButton = true,
+  showCompass = true,
+  showScale = true,
+  showTraffic = true,
+  showBuildings = true,
+  showIndoors = true,
+  mapType = 'standard',
+  useDijkstra = false,
+  pathFinder = null
+}: RouteMapProps) {
+  const mapRef = useRef<MapView>(null);
+  const [route, setRoute] = useState<any>(null);
+  const [routeCoordinates, setRouteCoordinates] = useState<any[]>([]);
+  const [routeAlternatives, setRouteAlternatives] = useState<Array<{ coords: any[]; info: any }>>([]);
 
-interface PathResult {
-  path: string[];
-  distance: number;
-  coordinates: Point[];
-  instructions: string[];
-}
-
-interface OverpassNode {
-  type: string;
-  id: number;
-  lat: number;
-  lon: number;
-}
-
-interface OverpassWay {
-  type: string;
-  id: number;
-  nodes: number[];
-  tags?: Record<string, string>;
-}
-
-interface OverpassResponse {
-  elements: (OverpassNode | OverpassWay)[];
-}
-
-export class PathFinder {
-  private nodes: Record<string, Node> = {};
-  private ways: OverpassWay[] = [];
-  private osmNodes: Record<string, OverpassNode> = {};
-  private initialized = false;
-  private lastFetchCenter: Point | null = null;
-  private lastFetchRadius = 0;
-
-  /**
-   * Fetch road network from OpenStreetMap using Overpass API
-   */
-  async fetchRoadNetwork(center: Point, radius: number): Promise<void> {
-    // Skip if already fetched for this area
-    if (this.initialized && 
-        this.lastFetchCenter && 
-        this.haversineDistance(center, this.lastFetchCenter) < radius * 0.5 &&
-        radius <= this.lastFetchRadius) {
-      return;
+  useEffect(() => {
+    if (origin && destination) {
+      if (useDijkstra && pathFinder) {
+        fetchDijkstraRoute();
+      } else {
+        fetchGoogleRoute();
+      }
+      fitMapToMarkers();
     }
+  }, [origin, destination, travelMode, useDijkstra, pathFinder]);
 
-    const overpassQuery = `
-      [out:json][timeout:25];
-      (
-        way["highway"]["highway"!~"footway|cycleway|path|steps|pedestrian"]
-           (around:${radius * 1000},${center.latitude},${center.longitude});
-      );
-      (._;>;);
-      out geom;
-    `;
-
+  const fetchDijkstraRoute = async () => {
     try {
-      const response = await fetch('https://overpass-api.de/api/interpreter', {
-        method: 'POST',
-        body: overpassQuery,
-        headers: {
-          'Content-Type': 'text/plain',
-        },
+      if (!pathFinder) {
+        console.error('PathFinder not provided for Dijkstra routing');
+        return;
+      }
+
+      // Find nearest nodes to origin and destination
+      const startNode = pathFinder.findNearestOsmNode({
+        latitude: origin.latitude,
+        longitude: origin.longitude
+      });
+      const endNode = pathFinder.findNearestOsmNode({
+        latitude: destination.latitude,
+        longitude: destination.longitude
       });
 
-      if (!response.ok) {
-        throw new Error(`Overpass API error: ${response.status}`);
+      if (!startNode || !endNode) {
+        console.error('Could not find route points on road network');
+        return;
       }
 
-      const data: OverpassResponse = await response.json();
-      this.processOverpassData(data);
-      
-      this.initialized = true;
-      this.lastFetchCenter = center;
-      this.lastFetchRadius = radius;
-      
-      console.log(`Loaded ${Object.keys(this.nodes).length} nodes and ${this.ways.length} ways`);
+      // Calculate route using Dijkstra algorithm
+      const result = pathFinder.findShortestPath(startNode, endNode);
+
+      if (result && result.path && result.path.length > 0) {
+        // Convert path to coordinates
+        const coordinates = pathFinder.getDetailedPathCoordinates(result.path);
+        
+        setRoute(result);
+        setRouteCoordinates(coordinates);
+        onRouteReceived?.(result);
+      } else {
+        console.warn('No route found using Dijkstra algorithm');
+      }
     } catch (error) {
-      console.error('Failed to fetch road network:', error);
-      // Fallback to demo data if API fails
-      this.createDemoNetwork(center);
+      console.error('Error fetching Dijkstra route:', error);
     }
-  }
+  };
 
-  /**
-   * Process Overpass API response and build graph
-   */
-  private processOverpassData(data: OverpassResponse): void {
-    const nodes: Record<string, OverpassNode> = {};
-    const ways: OverpassWay[] = [];
+  const fetchGoogleRoute = async () => {
+    try {
+      const originStr = `${origin.latitude},${origin.longitude}`;
+      const destinationStr = `${destination.latitude},${destination.longitude}`;
 
-    // Separate nodes and ways
-    for (const element of data.elements) {
-      if (element.type === 'node') {
-        const node = element as OverpassNode;
-        nodes[node.id.toString()] = node;
-      } else if (element.type === 'way') {
-        const way = element as OverpassWay;
-        if (way.nodes && way.nodes.length > 1) {
-          ways.push(way);
-        }
-      }
-    }
-
-    this.osmNodes = nodes;
-    this.ways = ways;
-
-    // Build adjacency graph
-    this.buildGraph();
-  }
-
-  /**
-   * Build graph from OSM nodes and ways
-   */
-  private buildGraph(): void {
-    const graph: Record<string, Node> = {};
-
-    // Initialize all nodes
-    for (const [nodeId, osmNode] of Object.entries(this.osmNodes)) {
-      graph[nodeId] = {
-        id: nodeId,
-        point: { latitude: osmNode.lat, longitude: osmNode.lon },
-        neighbors: []
+      const params = {
+        origin: originStr,
+        destination: destinationStr,
+        mode: travelMode,
+        alternatives: 'true',
+        departure_time: 'now',
+        units: 'metric',
       };
-    }
 
-    // Add connections from ways
-    for (const way of this.ways) {
-      const isOneWay = way.tags?.oneway === 'yes';
-      
-      for (let i = 0; i < way.nodes.length - 1; i++) {
-        const currentNodeId = way.nodes[i].toString();
-        const nextNodeId = way.nodes[i + 1].toString();
+      const url = buildGoogleMapsUrl(GOOGLE_MAPS_ENDPOINTS.DIRECTIONS, params);
+      const response = await fetch(url);
+      const data = await response.json();
 
-        if (graph[currentNodeId] && graph[nextNodeId]) {
-          // Add forward connection
-          if (!graph[currentNodeId].neighbors.includes(nextNodeId)) {
-            graph[currentNodeId].neighbors.push(nextNodeId);
-          }
-
-          // Add backward connection if not one-way
-          if (!isOneWay && !graph[nextNodeId].neighbors.includes(currentNodeId)) {
-            graph[nextNodeId].neighbors.push(currentNodeId);
-          }
-        }
+      if (data.status === 'OK' && data.routes && data.routes.length > 0) {
+        const primary = data.routes[0];
+        const primaryCoords = decodePolyline(primary.overview_polyline.points);
+        setRoute(primary);
+        setRouteCoordinates(primaryCoords);
+        const alts = data.routes.slice(0, 3).map((r: any) => ({
+          coords: decodePolyline(r.overview_polyline.points),
+          info: r
+        }));
+        setRouteAlternatives(alts);
+        onRouteReceived?.(data.routes);
+      } else {
+        // Fallback to OSRM if Google fails
+        fetchOSRMRoute();
       }
+    } catch (error) {
+      console.error('Error fetching Google route:', error);
+      // Fallback to OSRM
+      fetchOSRMRoute();
     }
+  };
 
-    // Filter out isolated nodes (nodes with no connections)
-    this.nodes = {};
-    for (const [nodeId, node] of Object.entries(graph)) {
-      if (node.neighbors.length > 0) {
-        this.nodes[nodeId] = node;
-      }
-    }
-  }
-
-  /**
-   * Create demo network if API fails
-   */
-  private createDemoNetwork(center: Point): void {
-    this.nodes = {};
-    const gridSize = 5;
-    const step = 0.001;
-
-    // Create a grid of nodes
-    for (let i = 0; i < gridSize; i++) {
-      for (let j = 0; j < gridSize; j++) {
-        const nodeId = `${i}-${j}`;
-        const neighbors: string[] = [];
-
-        // Add connections to adjacent nodes
-        if (i > 0) neighbors.push(`${i - 1}-${j}`);
-        if (i < gridSize - 1) neighbors.push(`${i + 1}-${j}`);
-        if (j > 0) neighbors.push(`${i}-${j - 1}`);
-        if (j < gridSize - 1) neighbors.push(`${i}-${j + 1}`);
-
-        this.nodes[nodeId] = {
-          id: nodeId,
-          point: {
-            latitude: center.latitude + (i - gridSize/2) * step,
-            longitude: center.longitude + (j - gridSize/2) * step
-          },
-          neighbors
-        };
-      }
-    }
-
-    this.initialized = true;
-    console.log('Created demo network with', Object.keys(this.nodes).length, 'nodes');
-  }
-
-  /**
-   * Find the nearest road node to a given point
-   */
-  findNearestNode(point: Point): string | null {
-    if (Object.keys(this.nodes).length === 0) {
-      return null;
-    }
-
-    let closestNodeId: string | null = null;
-    let minDistance = Infinity;
-
-    for (const [nodeId, node] of Object.entries(this.nodes)) {
-      const distance = this.haversineDistance(point, node.point);
-      if (distance < minDistance) {
-        minDistance = distance;
-        closestNodeId = nodeId;
-      }
-    }
-
-    return closestNodeId;
-  }
-
-  /**
-   * Convert PathFinder graph to Dijkstra-compatible graph format
-   */
-  private convertGraphToDijkstraFormat(): Record<string, Record<string, number>> {
-    const graph: Record<string, Record<string, number>> = {};
-
-    for (const [nodeId, node] of Object.entries(this.nodes)) {
-      graph[nodeId] = {};
-      for (const neighborId of node.neighbors) {
-        const distance = this.haversineDistance(node.point, this.nodes[neighborId].point);
-        graph[nodeId][neighborId] = distance;
-      }
-    }
-
-    return graph;
-  }
-
-  /**
-   * Find shortest path using Dijkstra's algorithm
-   */
-  findShortestPath(startId: string, endId: string): PathResult | null {
-    if (!this.nodes[startId] || !this.nodes[endId]) {
-      console.error('Start or end node not found');
-      return null;
-    }
-
-    // Convert graph to Dijkstra-compatible format
-    const graph = this.convertGraphToDijkstraFormat();
-
-    // Use Dijkstra's algorithm to find the shortest path
-    const result = dijkstra(graph, startId, endId);
-
-    if (!result.path || result.path.length === 0) {
-      console.error('No path found between nodes');
-      return null;
-    }
-
-    // Generate coordinates and instructions
-    const coordinates = result.path.map(nodeId => this.nodes[nodeId].point);
-    const instructions = this.generateInstructions(result.path);
-
-    return {
-      path: result.path,
-      distance: result.distance,
-      coordinates,
-      instructions,
-    };
-  }
-
-  /**
-   * Find path between two geographic points
-   */
-  async findPath(start: Point, end: Point, searchRadius = 1): Promise<PathResult | null> {
-    // Ensure road network is loaded
-    const center = {
-      latitude: (start.latitude + end.latitude) / 2,
-      longitude: (start.longitude + end.longitude) / 2
-    };
-    
-    await this.fetchRoadNetwork(center, searchRadius);
-
-    // Find nearest nodes
-    const startNodeId = this.findNearestNode(start);
-    const endNodeId = this.findNearestNode(end);
-
-    if (!startNodeId || !endNodeId) {
-      console.error('Could not find nearest nodes');
-      return null;
-    }
-
-    console.log(`Pathfinding from node ${startNodeId} to node ${endNodeId}`);
-    return this.findShortestPath(startNodeId, endNodeId);
-  }
-
-  /**
-   * Generate turn-by-turn instructions
-   */
-  private generateInstructions(path: string[]): string[] {
-    const instructions: string[] = [];
-    
-    if (path.length < 2) return instructions;
-
-    instructions.push('Start your journey');
-
-    for (let i = 1; i < path.length - 1; i++) {
-      const prevPoint = this.nodes[path[i - 1]].point;
-      const currentPoint = this.nodes[path[i]].point;
-      const nextPoint = this.nodes[path[i + 1]].point;
-
-      const bearing1 = this.calculateBearing(prevPoint, currentPoint);
-      const bearing2 = this.calculateBearing(currentPoint, nextPoint);
-      const turn = this.calculateTurnDirection(bearing1, bearing2);
-
-      const distance = this.haversineDistance(currentPoint, nextPoint);
-      const distanceText = distance > 1000 ? 
-        `${(distance / 1000).toFixed(1)} km` : 
-        `${Math.round(distance)} m`;
-
-      if (turn !== 'straight') {
-        instructions.push(`${turn.charAt(0).toUpperCase() + turn.slice(1)} and continue for ${distanceText}`);
-      } else if (distance > 500) {
-        instructions.push(`Continue straight for ${distanceText}`);
-      }
-    }
-
-    instructions.push('You have arrived at your destination');
-    return instructions;
-  }
-
-  /**
-   * Calculate bearing between two points
-   */
-  private calculateBearing(p1: Point, p2: Point): number {
-    const toRad = (deg: number) => deg * Math.PI / 180;
-    const toDeg = (rad: number) => rad * 180 / Math.PI;
-
-    const dLon = toRad(p2.longitude - p1.longitude);
-    const lat1 = toRad(p1.latitude);
-    const lat2 = toRad(p2.latitude);
-
-    const x = Math.sin(dLon) * Math.cos(lat2);
-    const y = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLon);
-
-    const bearing = toDeg(Math.atan2(x, y));
-    return (bearing + 360) % 360;
-  }
-
-  /**
-   * Calculate turn direction based on bearing change
-   */
-  private calculateTurnDirection(bearing1: number, bearing2: number): string {
-    let diff = bearing2 - bearing1;
-    if (diff > 180) diff -= 360;
-    if (diff < -180) diff += 360;
-
-    if (Math.abs(diff) < 15) return 'straight';
-    if (diff > 15 && diff < 45) return 'slight right';
-    if (diff >= 45 && diff < 135) return 'turn right';
-    if (diff >= 135) return 'sharp right';
-    if (diff < -15 && diff > -45) return 'slight left';
-    if (diff <= -45 && diff > -135) return 'turn left';
-    if (diff <= -135) return 'sharp left';
-    
-    return 'straight';
-  }
-
-  /**
-   * Calculate distance between two points using Haversine formula
-   */
-  private haversineDistance(p1: Point, p2: Point): number {
-    const toRad = (value: number) => (value * Math.PI) / 180;
-    const R = 6371e3; // Earth's radius in meters
-    
-    const dLat = toRad(p2.latitude - p1.latitude);
-    const dLon = toRad(p2.longitude - p1.longitude);
-    const lat1 = toRad(p1.latitude);
-    const lat2 = toRad(p2.latitude);
-
-    const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-              Math.cos(lat1) * Math.cos(lat2) *
-              Math.sin(dLon / 2) * Math.sin(dLon / 2);
-
-    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-    return R * c;
-  }
-
-  /**
-   * Get all loaded nodes (for debugging/visualization)
-   */
-  getNodes(): Record<string, Node> {
-    return this.nodes;
-  }
-
-  /**
-   * Get network statistics
-   */
-  getNetworkStats(): { nodeCount: number; connectionCount: number; isInitialized: boolean } {
-    const connectionCount = Object.values(this.nodes)
-      .reduce((total, node) => total + node.neighbors.length, 0);
-
-    return {
-      nodeCount: Object.keys(this.nodes).length,
-      connectionCount,
-      isInitialized: this.initialized
-    };
-  }
-
-  /**
-   * Search for locations by name using Nominatim API
-   */
-  async searchLocation(query: string): Promise<Point[]> {
+  const fetchOSRMRoute = async () => {
     try {
       const response = await fetch(
-        `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json&limit=5`
+        `https://router.project-osrm.org/route/v1/driving/` +
+        `${origin.longitude},${origin.latitude};${destination.longitude},${destination.latitude}` +
+        `?overview=full&geometries=geojson`
       );
+      const data = await response.json();
       
-      if (!response.ok) {
-        throw new Error(`Nominatim API error: ${response.status}`);
+      if (data.routes && data.routes[0]) {
+        const coordinates = data.routes[0].geometry.coordinates.map((coord: number[]) => ({
+          latitude: coord[1],
+          longitude: coord[0],
+        }));
+        setRouteCoordinates(coordinates);
+        onRouteReceived?.(data.routes[0]);
       }
-
-      const results = await response.json();
-      return results.map((result: any) => ({
-        latitude: parseFloat(result.lat),
-        longitude: parseFloat(result.lon)
-      }));
     } catch (error) {
-      console.error('Failed to search location:', error);
-      return [];
+      console.error('Error fetching OSRM route:', error);
     }
-  }
+  };
+
+  const decodePolyline = (encoded: string) => {
+    const poly = [];
+    let index = 0, len = encoded.length;
+    let lat = 0, lng = 0;
+
+    while (index < len) {
+      let shift = 0, result = 0;
+
+      do {
+        let b = encoded.charCodeAt(index++) - 63;
+        result |= (b & 0x1f) << shift;
+        shift += 5;
+      } while (result >= 0x20);
+
+      let dlat = ((result & 1) ? ~(result >> 1) : (result >> 1));
+      lat += dlat;
+
+      shift = 0;
+      result = 0;
+
+      do {
+        let b = encoded.charCodeAt(index++) - 63;
+        result |= (b & 0x1f) << shift;
+        shift += 5;
+      } while (result >= 0x20);
+
+      let dlng = ((result & 1) ? ~(result >> 1) : (result >> 1));
+      lng += dlng;
+
+      poly.push({
+        latitude: lat / 1E5,
+        longitude: lng / 1E5,
+      });
+    }
+
+    return poly;
+  };
+
+  const fitMapToMarkers = () => {
+    if (mapRef.current) {
+      mapRef.current.fitToCoordinates(
+        [
+          { latitude: origin.latitude, longitude: origin.longitude },
+          { latitude: destination.latitude, longitude: destination.longitude }
+        ],
+        {
+          edgePadding: { top: 50, right: 50, bottom: 50, left: 50 },
+          animated: true,
+        }
+      );
+    }
+  };
+
+  return (
+    <View style={styles.container}>
+      <MapView
+        ref={mapRef}
+        style={style || styles.map}
+        provider={PROVIDER_DEFAULT}
+        initialRegion={{
+          latitude: origin.latitude,
+          longitude: origin.longitude,
+          latitudeDelta: 0.0922,
+          longitudeDelta: 0.0421,
+        }}
+        showsUserLocation={showUserLocation}
+        showsMyLocationButton={showMyLocationButton}
+        showsCompass={showCompass}
+        showsScale={showScale}
+        showsTraffic={showTraffic}
+        showsBuildings={showBuildings}
+        showsIndoors={showIndoors}
+        mapType={mapType}
+        >
+        <Marker 
+          coordinate={origin}
+          title="Origin"
+          description={origin.address}
+          pinColor="#10b981"
+        />
+        
+        <Marker 
+          coordinate={destination}
+          title="Destination"
+          description={destination.address}
+          pinColor="#ef4444"
+        />
+        
+        {/* Additional Markers */}
+        {additionalMarkers.map((marker, index) => (
+          <Marker
+            key={`additional-${index}`}
+            coordinate={marker.coordinate}
+            title={marker.title}
+            description={marker.description}
+            pinColor={marker.pinColor}
+            onPress={marker.onPress}
+          >
+            {marker.title === "Ride Request" && (
+              <View style={styles.rideRequestMarker}>
+                <Ionicons name="car" size={24} color="#FF6B35" />
+              </View>
+            )}
+          </Marker>
+        ))}
+        
+        {routeCoordinates.length > 0 && (
+          <Polyline
+            coordinates={routeCoordinates}
+            strokeColor="#007AFF"
+            strokeWidth={5}
+            geodesic={true}
+          />
+        )}
+        {routeAlternatives.map((alt, idx) => (
+          <Polyline
+            key={`alt-${idx}`}
+            coordinates={alt.coords}
+            strokeColor={idx === 0 ? '#10b981' : '#9ca3af'}
+            strokeWidth={3}
+            lineDashPattern={[4]}
+            geodesic={true}
+          />
+        ))}
+      </MapView>
+    </View>
+  );
 }
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+  },
+  map: {
+    width: '100%',
+    height: '100%',
+  },
+  rideRequestMarker: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#fff',
+    borderRadius: 20,
+    padding: 8,
+    borderWidth: 2,
+    borderColor: '#FF6B35',
+  }
+});
+
+export { RouteMap };

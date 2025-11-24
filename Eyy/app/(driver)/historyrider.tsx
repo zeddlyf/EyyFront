@@ -21,14 +21,14 @@ interface Ride {
   fare?: number;
   distance?: number;
   duration?: number;
-  driver?: {
+  commuter?: {
     fullName?: string;
     phoneNumber?: string;
   };
   [key: string]: any;
 }
 
-export default function HistoryCommuter() {
+export default function HistoryRider() {
   const router = useRouter();
   const [rides, setRides] = useState<Ride[]>([]);
   const [loading, setLoading] = useState(true);
@@ -44,7 +44,7 @@ export default function HistoryCommuter() {
     } catch (err: any) {
       if (err.message && err.message.toLowerCase().includes('authenticate')) {
         Alert.alert('Session expired', 'Please log in again.');
-        router.replace('/logincommuter');
+        router.replace('/loginrider');
       } else {
         setError(err.message || 'Failed to fetch rides');
       }
@@ -110,7 +110,7 @@ export default function HistoryCommuter() {
       const token = await AsyncStorage.getItem('token');
       if (!token) {
         Alert.alert('Session expired', 'Please log in again.');
-        router.replace('/logincommuter');
+        router.replace('/loginrider');
         return;
       }
       fetchRides();
@@ -168,7 +168,7 @@ export default function HistoryCommuter() {
             </View>
           </View>
           <Text style={styles.subtitle}>
-            Track your completed rides and payments
+            Track your completed rides and earnings
           </Text>
         </View>
 
@@ -199,14 +199,14 @@ export default function HistoryCommuter() {
               </View>
               <Text style={styles.emptyTitle}>No completed rides yet!</Text>
               <Text style={styles.emptySubtext}>
-                Your completed rides will appear here once you take your first trip.
+                Your completed rides will appear here once you finish your first trip.
               </Text>
               <TouchableOpacity 
-                style={styles.bookRideButton}
-                onPress={() => router.push('/locationcommuter')}
+                style={styles.goOnlineButton}
+                onPress={() => router.push('/dashboardrider')}
               >
-                <Ionicons name="location" size={16} color="#fff" />
-                <Text style={styles.bookRideButtonText}>Book a Ride</Text>
+                <Ionicons name="car" size={16} color="#fff" />
+                <Text style={styles.goOnlineButtonText}>Go Online</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -276,16 +276,16 @@ export default function HistoryCommuter() {
                   </View>
                 </View>
                 
-                {/* Driver Info */}
-                {ride.driver && (
-                  <View style={styles.driverInfo}>
-                    <View style={styles.driverIcon}>
+                {/* Passenger Info */}
+                {ride.commuter && (
+                  <View style={styles.commuterInfo}>
+                    <View style={styles.commuterIcon}>
                       <Ionicons name="person" size={14} color="#666" />
                     </View>
-                    <View style={styles.driverContent}>
-                      <Text style={styles.driverLabel}>Driver</Text>
-                      <Text style={styles.driverText}>
-                        {ride.driver.fullName || 'Driver'}
+                    <View style={styles.commuterContent}>
+                      <Text style={styles.commuterLabel}>Passenger</Text>
+                      <Text style={styles.commuterText}>
+                        {ride.commuter.fullName || 'Passenger'}
                       </Text>
                     </View>
                   </View>
@@ -518,7 +518,7 @@ const styles = StyleSheet.create({
     lineHeight: 22,
     marginBottom: 24,
   },
-  bookRideButton: {
+  goOnlineButton: {
     backgroundColor: '#0d4217',
     paddingHorizontal: 24,
     paddingVertical: 12,
@@ -526,7 +526,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
   },
-  bookRideButtonText: {
+  goOnlineButtonText: {
     color: '#fff',
     fontWeight: 'bold',
     fontSize: 16,
@@ -632,7 +632,7 @@ const styles = StyleSheet.create({
     marginVertical: 8,
     marginLeft: 36,
   },
-  driverInfo: {
+  commuterInfo: {
     flexDirection: 'row',
     alignItems: 'center',
     marginBottom: 16,
@@ -640,7 +640,7 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: '#f0f0f0',
   },
-  driverIcon: {
+  commuterIcon: {
     width: 24,
     height: 24,
     borderRadius: 12,
@@ -649,16 +649,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginRight: 12,
   },
-  driverContent: {
+  commuterContent: {
     flex: 1,
   },
-  driverLabel: {
+  commuterLabel: {
     fontSize: 12,
     color: '#999',
     marginBottom: 2,
     fontWeight: '500',
   },
-  driverText: {
+  commuterText: {
     fontSize: 14,
     color: '#333',
   },

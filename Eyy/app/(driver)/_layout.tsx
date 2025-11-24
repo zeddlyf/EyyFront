@@ -1,7 +1,7 @@
 import { Tabs } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 
-export default function CommuterLayout() {
+export default function DriverLayout() {
   return (
     <Tabs
       screenOptions={{
@@ -16,7 +16,7 @@ export default function CommuterLayout() {
       }}
     >
       <Tabs.Screen
-        name="dashboardcommuter"
+        name="dashboardrider"
         options={{
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="home" size={size} color={color} />
@@ -25,7 +25,7 @@ export default function CommuterLayout() {
         }}
       />
       <Tabs.Screen
-        name="historycommuter"
+        name="historyrider"
         options={{
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="time" size={size} color={color} />
@@ -34,7 +34,7 @@ export default function CommuterLayout() {
         }}
       />
       <Tabs.Screen
-        name="profilecommuter"
+        name="profilerider"
         options={{
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="person" size={size} color={color} />
@@ -43,34 +43,23 @@ export default function CommuterLayout() {
         }}
       />
       <Tabs.Screen
-        name="booking"
+        name="menurider"
         options={{
           href: null,
+          tabBarShowLabel: false,
           tabBarStyle: { display: 'none' },
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="book" size={size} color={color} />
-          ),
-          tabBarShowLabel: false,
         }}
       />
       <Tabs.Screen
-        name="menucommuter"
+        name="editprofilerider"
         options={{
           href: null,
           tabBarShowLabel: false,
-          tabBarStyle: { display: 'none' }, 
-        }}
-      />
-      <Tabs.Screen
-        name="editprofilecommuter"
-        options={{
-          href: null,
-          tabBarShowLabel: false,
-          tabBarStyle: { display: 'none' }, 
+          tabBarStyle: { display: 'none' },
         }}
       />
     </Tabs>
     
     
   );
-} 
+}

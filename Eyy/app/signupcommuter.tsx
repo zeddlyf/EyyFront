@@ -1,10 +1,11 @@
 import { StyleSheet, Text, View, TextInput, TouchableOpacity, Image, ScrollView, Alert, ActivityIndicator } from 'react-native';
+import AddressForm from '../components/AddressForm';
 import { useRouter } from 'expo-router';
 import { AntDesign } from '@expo/vector-icons';
 import { useState } from 'react';
 import { authAPI, UserData } from '../lib/api';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import api from '../lib/api'; // Import the default export (axios instance)
+import api, { API_URL } from '../lib/api'; // Import API_URL
 
 export default function CommuterSignUpScreen() {
   const router = useRouter();
@@ -14,6 +15,7 @@ export default function CommuterSignUpScreen() {
     fullName: '',
     email: '',
     phoneNumber: '',
+    address: { street: '', barangay: '', city: '', province: '', postalCode: '' },
     password: '',
     confirmPassword: '',
   });
@@ -22,34 +24,97 @@ export default function CommuterSignUpScreen() {
     setFormData(prev => ({ ...prev, [field]: value }));
   };
 
-  const handleSignUp = async () => {
-    // Validate form
-    if (!formData.fullName || !formData.email || !formData.phoneNumber || !formData.password || !formData.confirmPassword) {
-      Alert.alert('Error', 'Please fill in all fields');
-      return;
+  const validateForm = () => {
+    if (!formData.fullName.trim()) {
+      Alert.alert('Error', 'Please enter your full name');
+      return false;
     }
-
+    if (!formData.email.trim()) {
+      Alert.alert('Error', 'Please enter your email');
+      return false;
+    }
+    if (!/\S+@\S+\.\S+/.test(formData.email)) {
+      Alert.alert('Error', 'Please enter a valid email address');
+      return false;
+    }
+    if (!formData.phoneNumber.trim()) {
+      Alert.alert('Error', 'Please enter your phone number');
+      return false;
+    }
+    if (!/^\+?[\d\s\-\(\)]+$/.test(formData.phoneNumber.trim())) {
+      Alert.alert('Error', 'Please enter a valid phone number');
+      return false;
+    }
+    if (!formData.address.street.trim()) {
+      Alert.alert('Error', 'Please enter your street address');
+      return false;
+    }
+    if (!formData.address.barangay.trim()) {
+      Alert.alert('Error', 'Please enter your barangay');
+      return false;
+    }
+    if (!formData.address.city.trim()) {
+      Alert.alert('Error', 'Please enter your city');
+      return false;
+    }
+    if (!formData.address.province.trim()) {
+      Alert.alert('Error', 'Please enter your province');
+      return false;
+    }
+    // ZIP Code optional
+    if (!formData.password) {
+      Alert.alert('Error', 'Please enter a password');
+      return false;
+    }
+    if (formData.password.length < 6) {
+      Alert.alert('Error', 'Password must be at least 6 characters long');
+      return false;
+    }
+    if (!/(?=.*[a-z])(?=.*[A-Z])(?=.*\d)/.test(formData.password)) {
+      Alert.alert('Error', 'Password must contain at least one uppercase letter, one lowercase letter, and one number');
+      return false;
+    }
     if (formData.password !== formData.confirmPassword) {
       Alert.alert('Error', 'Passwords do not match');
-      return;
+      return false;
     }
-
     if (!isChecked) {
-      Alert.alert('Error', 'Please agree to the Terms & Privacy');
+      Alert.alert('Error', 'Please agree to the Terms & Privacy Policy');
+      return false;
+    }
+    return true;
+  };
+
+  const handleSignUp = async () => {
+    if (!validateForm()) {
       return;
     }
 
     setIsLoading(true);
     try {
+      // Split fullName into firstName and lastName
+      const nameParts = formData.fullName.split(' ');
+      const lastName = nameParts.pop() || '';
+      const firstName = nameParts.join(' ');
+      
       const userData: UserData = {
         email: formData.email,
         password: formData.password,
-        fullName: formData.fullName,
+        firstName: firstName,
+        lastName: lastName,
         phoneNumber: formData.phoneNumber,
+        address: {
+          street: formData.address.street,
+          barangay: formData.address.barangay,
+          city: formData.address.city,
+          province: formData.address.province,
+          postalCode: formData.address.postalCode,
+          country: 'Philippines'
+        },
         role: 'commuter'
       };
 
-      console.log('Attempting signup with URL:', api.baseURL + '/api/auth/register', 'and data:', userData);
+      console.log('Attempting signup with URL:', API_URL + '/api/auth/register', 'and data:', userData);
       const response = await authAPI.register(userData);
 
       // Store the token and user data
@@ -134,6 +199,12 @@ export default function CommuterSignUpScreen() {
             onChangeText={(value) => handleInputChange('phoneNumber', value)}
           />
         </View>
+
+        <AddressForm
+          value={formData.address}
+          onChange={(addr) => setFormData(prev => ({ ...prev, address: addr }))}
+          accessibilityPrefix="Registration"
+        />
 
         <View style={styles.inputContainer}>
           <AntDesign name="lock" size={20} color="#666666" style={styles.inputIcon} />
@@ -319,4 +390,4 @@ const styles = StyleSheet.create({
     padding: 5,
     alignSelf: 'flex-start',
   },
-}); 
+});

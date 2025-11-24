@@ -1,7 +1,8 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { Socket } from 'socket.io-client';
 import createSocket from './socket-config';
-import Constants from 'expo-constants';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { getSocketUrl } from './config';
 
 // Define the context type
 interface SocketContextType {
@@ -24,21 +25,18 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    // Get the server URL from environment variables or use a default
-    const serverUrl = Constants.expoConfig?.extra?.serverUrl || 'http://localhost:3000';
-    
+    const serverUrl = getSocketUrl();
+    let interval: any;
     try {
-      // Create socket connection
       const socketInstance = createSocket(serverUrl);
 
-      // Set up event listeners
       socketInstance.on('connect', () => {
         console.log('Socket connected');
         setIsConnected(true);
         setError(null);
       });
 
-      socketInstance.on('disconnect', () => {
+      socketInstance.on('disconnect', (reason: any) => {
         console.log('Socket disconnected');
         setIsConnected(false);
       });
@@ -49,14 +47,27 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
         setIsConnected(false);
       });
 
-      // Store the socket instance
+      const tryConnectWithToken = async () => {
+        try {
+          const token = await AsyncStorage.getItem('token');
+          if (!token) {
+            return; // Do not connect without auth; server will reject unauthenticated sockets
+          }
+          socketInstance.auth = { token };
+          if (!socketInstance.connected) {
+            socketInstance.connect();
+          }
+        } catch {}
+      };
+
       setSocket(socketInstance);
+      // Attempt initial connect only if token exists
+      tryConnectWithToken();
+      // Periodically attempt reconnect if we have a token and are not connected
+      interval = setInterval(tryConnectWithToken, 10000);
 
-      // Connect the socket
-      socketInstance.connect();
-
-      // Cleanup on unmount
       return () => {
+        clearInterval(interval);
         if (socketInstance.connected) {
           socketInstance.disconnect();
         }
@@ -81,4 +92,4 @@ export function useSocket() {
     throw new Error('useSocket must be used within a SocketProvider');
   }
   return context;
-} 
+}

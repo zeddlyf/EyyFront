@@ -1,9 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, StyleSheet, Text, SafeAreaView, Platform, StatusBar, Image, TouchableOpacity, Alert } from 'react-native';
+import { View, StyleSheet, Text, SafeAreaView, Platform, StatusBar, Image, TouchableOpacity, Alert, Animated } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import MapView, { Marker, PROVIDER_GOOGLE } from 'react-native-maps';
 import * as Location from 'expo-location';
+import { useSocket } from '../../lib/socket-context';
+import { userAPI } from '../../lib/api';
 
 interface Location {
   latitude: number;
@@ -12,6 +14,7 @@ interface Location {
 
 export default function DashboardCommuter() {
   const router = useRouter();
+  const { socket, isConnected } = useSocket();
   const mapRef = useRef<MapView>(null);
   const [currentLocation, setCurrentLocation] = useState<Location>({
     latitude: 13.6195,
@@ -25,6 +28,26 @@ export default function DashboardCommuter() {
     latitudeDelta: 0.0922,
     longitudeDelta: 0.0421,
   });
+  const pulseAnim = useRef(new Animated.Value(1)).current;
+  const locationSubscription = useRef<Location.LocationSubscription | null>(null);
+  const [activeDrivers, setActiveDrivers] = useState<any[]>([]);
+
+  const startPulseAnimation = () => {
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulseAnim, {
+          toValue: 1.2,
+          duration: 1000,
+          useNativeDriver: true,
+        }),
+        Animated.timing(pulseAnim, {
+          toValue: 1,
+          duration: 1000,
+          useNativeDriver: true,
+        }),
+      ])
+    ).start();
+  };
 
   const getCurrentLocation = async () => {
     try {
@@ -56,6 +79,28 @@ export default function DashboardCommuter() {
       setRegion(newRegion);
       
       mapRef.current?.animateToRegion(newRegion, 1000);
+
+      // Start watching location
+      if (locationSubscription.current) {
+        locationSubscription.current.remove();
+      }
+
+      locationSubscription.current = await Location.watchPositionAsync(
+        {
+          accuracy: Location.Accuracy.High,
+          timeInterval: 5000,
+          distanceInterval: 10,
+        },
+        (location) => {
+          const newLocation = {
+            latitude: location.coords.latitude,
+            longitude: location.coords.longitude,
+          };
+          setCurrentLocation(newLocation);
+          setLocationAccuracy(location.coords.accuracy);
+        }
+      );
+
     } catch (error) {
       console.error('Error getting location:', error);
       Alert.alert('Error', 'Failed to get your current location. Please try again.');
@@ -66,6 +111,42 @@ export default function DashboardCommuter() {
 
   useEffect(() => {
     getCurrentLocation();
+    startPulseAnimation();
+
+    // Initial load of active drivers
+    (async () => {
+      try {
+        const drivers = await userAPI.getNearbyDrivers(currentLocation.latitude, currentLocation.longitude, 20000);
+        setActiveDrivers(drivers);
+      } catch (err) {}
+    })();
+
+    // Socket updates for driver locations
+    if (socket) {
+      socket.on('driverLocationChanged', (payload: any) => {
+        const { driverId, location, status } = payload;
+        setActiveDrivers((prev) => {
+          const idx = prev.findIndex((d: any) => d._id === driverId);
+          if (idx >= 0) {
+            const updated = [...prev];
+            updated[idx] = {
+              ...updated[idx],
+              location: { type: 'Point', coordinates: [location.longitude, location.latitude] },
+              isAvailable: status !== 'on-trip'
+            };
+            return updated;
+          }
+          return prev;
+        });
+      });
+    }
+
+    return () => {
+      if (locationSubscription.current) {
+        locationSubscription.current.remove();
+      }
+      if (socket) socket.off('driverLocationChanged');
+    };
   }, []);
 
   return (
@@ -87,7 +168,7 @@ export default function DashboardCommuter() {
         <MapView
           ref={mapRef}
           provider={PROVIDER_GOOGLE}
-          style={styles.map}
+          style={StyleSheet.absoluteFill}
           initialRegion={region}
           onRegionChangeComplete={setRegion}
           showsUserLocation={true}
@@ -100,10 +181,32 @@ export default function DashboardCommuter() {
             title="Your Location"
             description={locationAccuracy ? `Accuracy: ${Math.round(locationAccuracy)}m` : undefined}
           >
-            <View style={styles.currentLocationMarker}>
+            <Animated.View 
+              style={[
+                styles.currentLocationMarker,
+                {
+                  transform: [{ scale: pulseAnim }]
+                }
+              ]}
+            >
+              <View style={styles.markerDot} />
               <Ionicons name="location" size={30} color="#0d4217" />
-            </View>
+            </Animated.View>
           </Marker>
+
+          {/* Active drivers markers */}
+          {activeDrivers.map((driver: any) => (
+            <Marker
+              key={driver._id}
+              coordinate={{
+                latitude: driver.location.coordinates[1],
+                longitude: driver.location.coordinates[0]
+              }}
+              title={`${driver.firstName} ${driver.lastName}`}
+              description={driver.isAvailable ? 'Available' : 'On trip'}
+              pinColor={driver.isAvailable ? '#3B82F6' : '#FF6B35'}
+            />
+          ))}
         </MapView>
 
         {/* Recenter Button */}
@@ -113,15 +216,23 @@ export default function DashboardCommuter() {
         >
           <Ionicons name="locate" size={24} color="#0d4217" />
         </TouchableOpacity>
+        {/* Book Button - now absolutely positioned */}
+        <TouchableOpacity 
+          style={styles.bookButton}
+          onPress={() => router.push({
+            pathname: '/booking',
+            params: {
+              initialLocation: JSON.stringify({
+                latitude: currentLocation.latitude,
+                longitude: currentLocation.longitude,
+                accuracy: locationAccuracy
+              })
+            }
+          })}
+        >
+          <Text style={styles.bookButtonText}>Book eyytrike</Text>
+        </TouchableOpacity>
       </View>
-
-      {/* Book Button */}
-      <TouchableOpacity 
-        style={styles.bookButton}
-        onPress={() => router.push('/bookingcommuter')}
-      >
-        <Text style={styles.bookButtonText}>Book eyytrike</Text>
-      </TouchableOpacity>
     </SafeAreaView>
   );
 }
@@ -150,12 +261,20 @@ const styles = StyleSheet.create({
     position: 'relative',
   },
   map: {
-    width: '100%',
-    height: '100%',
+    // Removed width and height, using StyleSheet.absoluteFill instead
   },
   currentLocationMarker: {
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  markerDot: {
+    position: 'absolute',
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    backgroundColor: '#0d4217',
+    borderWidth: 2,
+    borderColor: '#fff',
   },
   recenterButton: {
     position: 'absolute',
@@ -176,14 +295,25 @@ const styles = StyleSheet.create({
   bookButton: {
     backgroundColor: '#FFD700',
     paddingVertical: 16,
-    margin: 16,
+    paddingHorizontal: 32,
     borderRadius: 25,
     alignItems: 'center',
-    marginBottom: 90,
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 40,
+    marginHorizontal: 40,
+    // Removed marginBottom
+    alignSelf: 'center',
+    elevation: 5,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
   },
   bookButtonText: {
     color: '#0d4217',
     fontSize: 16,
     fontWeight: 'bold',
   },
-}); 
+});

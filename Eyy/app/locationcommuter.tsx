@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, StyleSheet, Text, SafeAreaView, Platform, StatusBar, TouchableOpacity, TextInput, Alert, ActivityIndicator } from 'react-native';
+import { View, StyleSheet, Text, SafeAreaView, Platform, StatusBar, TouchableOpacity, TextInput, Alert, ActivityIndicator, Modal } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Link, useRouter, useLocalSearchParams } from 'expo-router';
 import MapView, { Marker, PROVIDER_GOOGLE, Polyline, PROVIDER_DEFAULT } from 'react-native-maps';
@@ -7,6 +7,7 @@ import * as Location from 'expo-location';
 import { PathFinder, Point } from '../utils/pathfinding';
 import { rideAPI } from '../lib/api';
 import { MaterialIcons } from '@expo/vector-icons';
+import GooglePlacesAutocomplete from '@/utils/GooglePlacesAutocomplete';
 
 interface Location extends Point {
   name?: string;
@@ -105,6 +106,8 @@ export default function LocationCommuter() {
   const [estimatedTime, setEstimatedTime] = useState<number>(0);
   const [fare, setFare] = useState<number>(0);
   const [totalDistance, setTotalDistance] = useState<number>(0);
+  const [showWaitingModal, setShowWaitingModal] = useState(false);
+  const [rideId, setRideId] = useState<string | null>(null);
 
   // Add cache cleaning function
   const cleanCache = () => {
@@ -139,170 +142,148 @@ export default function LocationCommuter() {
   };
 
   // Initialize pathfinder with OpenStreetMap data
-  useEffect(() => {
-    const initializePathFinder = async () => {
-      try {
-        setIsLoading(true);
-        
-        // Fetch road network data around current location with a smaller radius
-        await pathFinder.fetchRoadNetwork(currentLocation, 2000); // Reduced to 2km radius
-        console.log('Initial road network fetched.', { 
-          nodes: Object.keys(pathFinder.getNodes()).length, 
-          osmNodes: Object.keys(pathFinder.getOsmNodes()).length, 
-          osmWays: Object.keys(pathFinder.getOsmWays()).length 
-        });
-        
-        // Find and connect nearest road node to current location
-        const nearestNodeId = pathFinder.findNearestOsmNode(currentLocation, 1000); // Reduced search radius
-        if (nearestNodeId) {
-          pathFinder.addNode('current', currentLocation);
-          pathFinder.addEdge('current', nearestNodeId);
-          console.log('Connected current location to nearest road node:', nearestNodeId);
-        } else {
-          console.warn('Could not connect current location to the initial road network.');
-          // Try to fetch more road network data with a smaller radius
-          await pathFinder.fetchRoadNetwork(currentLocation, 3000);
-          const retryNodeId = pathFinder.findNearestOsmNode(currentLocation, 1500);
-          if (retryNodeId) {
-            pathFinder.addNode('current', currentLocation);
-            pathFinder.addEdge('current', retryNodeId);
-            console.log('Connected current location to nearest road node on retry:', retryNodeId);
-          }
-        }
-      } catch (error) {
-        console.error('Error initializing pathfinder:', error);
-        Alert.alert('Error', 'Failed to load initial road network data. Please try again.');
-      } finally {
-        setIsLoading(false);
-      }
+ 
+  const handleSearch = async (query: string) => {
+  try {
+    setIsLoading(true);
+    setSearchError(null);
+
+    const results = await searchLocation(query);
+    if (!results || results.length === 0) throw new Error('No results found');
+
+    const validResult = results.find(result =>
+      isWithinNagaCity({
+        latitude: result.lat,
+        longitude: result.lon,
+      } as Location)
+    );
+    if (!validResult) {
+      throw new Error("No destinations found within Naga City.");
+    }
+
+    const newDestination: Location = {
+      latitude: validResult.lat,           // ✅ Use the filtered valid result
+      longitude: validResult.lon,
+      name: validResult.display_name,
+      address: validResult.display_name,
+      timestamp: Date.now(),
     };
 
-    initializePathFinder();
-  }, [currentLocation]);
 
-  const handleSearch = async (query: string) => {
-    try {
-      setIsLoading(true);
-      setSearchError(null);
+    setDestination(newDestination);
+    updateMapRegion(newDestination);
 
-      // Check cache first
-      const cachedResult = searchCache[query];
-      if (cachedResult?.timestamp && Date.now() - cachedResult.timestamp < CACHE_EXPIRY) {
-        console.log('Using cached search result');
-        setDestination(cachedResult);
-        updateMapRegion(cachedResult);
-        
-        // Calculate path using road network
-        const nearestCurrentOsmNodeId = pathFinder.findNearestOsmNode(currentLocation, 10000);
-        const nearestDestinationOsmNodeId = pathFinder.findNearestOsmNode(cachedResult, 10000);
+    // Fetch road network data
+    await pathFinder.fetchRoadNetwork(currentLocation, 3000);
+    await pathFinder.fetchRoadNetwork(newDestination, 3000);
 
-        if (!nearestCurrentOsmNodeId || !nearestDestinationOsmNodeId) {
-          throw new Error('Could not find road connections for cached location');
-        }
+    // Find nearest OSM nodes
+    const startNodeId = pathFinder.findNearestOsmNode(currentLocation, 1000);
+    const endNodeId = pathFinder.findNearestOsmNode(newDestination, 1000);
 
-        const pathResult = await calculatePath(nearestCurrentOsmNodeId, nearestDestinationOsmNodeId, cachedResult);
-        setPathCoordinates(pathResult);
-        return;
-      }
-
-      // Perform new search
-      const results = await searchLocation(query);
-      if (!results || results.length === 0) {
-        throw new Error('No results found');
-      }
-
-      const newDestination: Location = {
-        latitude: results[0].lat,
-        longitude: results[0].lon,
-        name: results[0].display_name,
-        timestamp: Date.now()
-      };
-
-      // Cache the result
-      setSearchCache(prev => {
-        const newCache = { ...prev, [query]: newDestination };
-        // Remove oldest entries if cache is too large
-        const entries = Object.entries(newCache);
-        if (entries.length > MAX_CACHE_SIZE) {
-          const sortedEntries = entries.sort((a, b) => (b[1].timestamp || 0) - (a[1].timestamp || 0));
-          return Object.fromEntries(sortedEntries.slice(0, MAX_CACHE_SIZE));
-        }
-        return newCache;
-      });
-
-      setDestination(newDestination);
-      updateMapRegion(newDestination);
-      
-      // Initialize pathfinder if needed
-      if (!pathFinder.getNodes()['current']) {
-        await pathFinder.fetchRoadNetwork(newDestination, 15000);
-      }
-
-      // Find nearest OSM nodes
-      const nearestCurrentOsmNodeId = pathFinder.findNearestOsmNode(currentLocation, 10000);
-      const nearestDestinationOsmNodeId = pathFinder.findNearestOsmNode(newDestination, 10000);
-
-      if (!nearestCurrentOsmNodeId || !nearestDestinationOsmNodeId) {
-        throw new Error('Could not find road connections for the destination');
-      }
-
-      const pathResult = await calculatePath(nearestCurrentOsmNodeId, nearestDestinationOsmNodeId, newDestination);
-      setPathCoordinates(pathResult);
-
-    } catch (error) {
-      console.error('Search error:', error);
-      setSearchError(error instanceof Error ? error.message : 'Failed to search location');
-      setDestination(null);
-      setPathCoordinates([]);
-    } finally {
-      setIsLoading(false);
+    if (!startNodeId || !endNodeId) {
+      throw new Error('Could not find valid OSM nodes for routing.');
     }
-  };
+
+    // Add and connect both current and destination nodes
+    pathFinder.addNode("current", currentLocation);
+    pathFinder.addEdge("current", startNodeId);
+
+    pathFinder.addNode("destination", newDestination);
+    pathFinder.addEdge("destination", endNodeId);
+
+    const path = await calculatePath("current", "destination", newDestination);
+    setPathCoordinates(path);
+
+  } catch (error) {
+    console.error('Search error:', error);
+    setSearchError('Failed to find destination or route.');
+    setDestination(null);
+    setPathCoordinates([]);
+  } finally {
+    setIsLoading(false);
+  }
+};
+
+
+
 
   // Enhanced path calculation with smoothing
-  const calculatePath = async (startNodeId: string, endNodeId: string, destination: Location): Promise<Point[]> => {
-    try {
-      setIsLoading(true);
-      const pathResult = pathFinder.findShortestPath(startNodeId, endNodeId);
-      
-      if (!pathResult) {
-        throw new Error('No path found');
-      }
+ const calculatePath = async (
+  startNodeId: string,
+  endNodeId: string,
+  destination: Location
+): Promise<Point[]> => {
+  try {
+    setIsLoading(true);
 
-      // Get detailed path coordinates
-      const detailedPath = pathFinder.getDetailedPathCoordinates(pathResult.path);
-      
-      // Calculate fare and update state
-      const fare = calculateEstimatedFare(currentLocation, destination);
-      setFare(fare);
-      setTotalDistance(pathResult.distance);
-      setEstimatedTime(pathResult.estimatedTime);
+    console.log("🛣️ Finding shortest path from", startNodeId, "to", endNodeId);
+    const pathResult = pathFinder.findShortestPath(startNodeId, endNodeId);
 
-      // Update path coordinates
-      setPathCoordinates(detailedPath);
+    if (!pathResult || !pathResult.path || pathResult.path.length < 2) {
+      console.warn("❌ No valid route found between nodes. Falling back to straight line.");
 
-      // Animate map to show the entire path
-      if (mapRef.current && detailedPath.length > 0) {
-        const coordinates = detailedPath.map(point => ({
-          latitude: point.latitude,
-          longitude: point.longitude
-        }));
+      const fallback = [
+        { latitude: currentLocation.latitude, longitude: currentLocation.longitude },
+        { latitude: destination.latitude, longitude: destination.longitude }
+      ];
 
-        mapRef.current.fitToCoordinates(coordinates, {
-          edgePadding: { top: 50, right: 50, bottom: 50, left: 50 },
-          animated: true
-        });
-      }
-
-      return detailedPath;
-    } catch (error) {
-      console.error('Error calculating path:', error);
-      setSearchError('Failed to calculate route. Please try again.');
-      return [];
-    } finally {
-      setIsLoading(false);
+      setPathCoordinates(fallback);
+      return fallback;
     }
-  };
+
+    const detailedPath = pathFinder.getDetailedPathCoordinates(pathResult.path);
+
+    if (!detailedPath || detailedPath.length < 2) {
+      console.warn("⚠️ Detailed path is too short, falling back to straight line.");
+
+      const fallback = [
+        { latitude: currentLocation.latitude, longitude: currentLocation.longitude },
+        { latitude: destination.latitude, longitude: destination.longitude }
+      ];
+
+      setPathCoordinates(fallback);
+      return fallback;
+    }
+
+    console.log("✅ Detailed path returned:", detailedPath.length, "points");
+
+    const fare = calculateEstimatedFare(currentLocation, destination);
+    setFare(fare);
+    setTotalDistance(pathResult.distance);
+    setEstimatedTime(pathResult.estimatedTime);
+    setPathCoordinates(detailedPath);
+
+    if (mapRef.current) {
+      mapRef.current.fitToCoordinates(
+        detailedPath.map(p => ({
+          latitude: p.latitude,
+          longitude: p.longitude,
+        })),
+        {
+          edgePadding: { top: 50, right: 50, bottom: 50, left: 50 },
+          animated: true,
+        }
+      );
+    }
+
+    return detailedPath;
+  } catch (error) {
+    console.error("❌ Error calculating path:", error);
+
+    // Extra fallback to straight line in case of unexpected errors
+    const fallback = [
+      { latitude: currentLocation.latitude, longitude: currentLocation.longitude },
+      { latitude: destination.latitude, longitude: destination.longitude }
+    ];
+
+    setPathCoordinates(fallback);
+    return fallback;
+  } finally {
+    setIsLoading(false);
+  }
+};
+
 
   // Enhanced path smoothing
   const smoothPath = (points: Point[]): Point[] => {
@@ -352,16 +333,19 @@ export default function LocationCommuter() {
     mapRef.current?.animateToRegion(newRegion, 300);
   };
 
-  const debouncedSearch = (text: string) => {
-    if (searchTimeout) {
-      clearTimeout(searchTimeout);
-    }
-    setSearchText(text);
-    const timeout = setTimeout(() => {
-      handleSearch(text);
-    }, 300); // Reduced debounce time to 300ms for better responsiveness
-    setSearchTimeout(timeout);
-  };
+const debouncedSearch = (text: string) => {
+  if (searchTimeout) {
+    clearTimeout(searchTimeout);
+  }
+  setSearchText(text);
+  const timeout = setTimeout(() => {
+    console.log("Searching for:", text); // ✅ this is the fix
+    handleSearch(text);
+    
+  }, 300);
+  setSearchTimeout(timeout);
+};
+
 
   const calculateDistance = (loc1: Location, loc2: Location): number => {
     const R = 6371e3; // Earth's radius in meters
@@ -387,94 +371,79 @@ export default function LocationCommuter() {
     );
   };
 
-  const handleChooseDestination = async () => {
-    if (!destination || isLoading || isBooking) return;
+const handleChooseDestination = async () => {
+  if (!destination || isLoading || isBooking) return;
 
-    try {
-      setIsBooking(true);
-      
-      // Validate current location and destination
-      if (!currentLocation || !destination) {
-        throw new Error('Invalid location data');
-      }
+  try {
+    setIsBooking(true);
 
-      // Validate coordinates
-      if (isNaN(currentLocation.latitude) || isNaN(currentLocation.longitude) ||
-          isNaN(destination.latitude) || isNaN(destination.longitude)) {
-        throw new Error('Invalid coordinates');
-      }
+    // 🧠 Basic validations
+    if (!currentLocation || !destination) {
+      throw new Error('Invalid location data');
+    }
 
-      // Calculate distance and fare
-      const distance = calculateDistance(currentLocation, destination);
-      if (distance <= 0) {
-        throw new Error('Invalid distance calculation');
-      }
+    if (
+      isNaN(currentLocation.latitude) || isNaN(currentLocation.longitude) ||
+      isNaN(destination.latitude) || isNaN(destination.longitude)
+    ) {
+      throw new Error('Invalid coordinates');
+    }
 
-      const estimatedFare = calculateEstimatedFare(currentLocation, destination);
-      if (estimatedFare <= 0) {
-        throw new Error('Invalid fare calculation');
-      }
+    // 🧮 Distance + fare calculation
+    const distance = calculateDistance(currentLocation, destination);
+    if (distance <= 0) {
+      throw new Error('Invalid distance calculation');
+    }
 
-      // Create ride data with all necessary fields
-      const rideData = {
-        pickupLocation: {
-          type: 'Point',
-          coordinates: [currentLocation.longitude, currentLocation.latitude] as [number, number],
-          address: currentLocation.address || "Current Location"
-        },
-        dropoffLocation: {
-          type: 'Point',
-          coordinates: [destination.longitude, destination.latitude] as [number, number],
-          address: destination.address || searchText || "Selected Destination"
-        },
-        fare: estimatedFare,
-        distance: distance,
-        duration: Math.ceil(distance / 1000 * 3), // Rough estimate: 3 minutes per km
-        paymentMethod: 'cash', // Default to cash payment
-        status: 'pending'
-      };
+    const estimatedFare = calculateEstimatedFare(currentLocation, destination);
+    if (estimatedFare <= 0) {
+      throw new Error('Invalid fare calculation');
+    }
 
-      console.log('Creating ride with data:', {
-        pickup: rideData.pickupLocation,
-        dropoff: rideData.dropoffLocation,
-        fare: rideData.fare,
-        distance: rideData.distance
-      });
+    // ✅ CLEAN rideData object — no extra keys inside GeoJSON
+  const rideData = {
+    pickupLocation: {
+      type: 'Point',
+      coordinates: [currentLocation.longitude, currentLocation.latitude] as [number, number],
+      address: currentLocation.address || "Current Location"
+    },
+    dropoffLocation: {
+      type: 'Point',
+      coordinates: [destination.longitude, destination.latitude] as [number, number],
+      address: destination.address || searchText || "Selected Destination"
+    },
+    fare: estimatedFare,
+    distance,
+    duration: Math.ceil(distance / 1000 * 3),
+    paymentMethod: 'cash',
+    status: 'pending',
+  };
 
-      // Create ride with retry logic
-      let retryCount = 0;
-      const maxRetries = 2;
-      let rideResponse = null;
 
-      while (retryCount < maxRetries && !rideResponse) {
-        try {
-          rideResponse = await rideAPI.createRide(rideData);
-          if (!rideResponse || !rideResponse.id) {
-            throw new Error('Invalid ride response');
-          }
-          console.log('Ride created successfully:', rideResponse.id);
-        } catch (error) {
-          console.error(`Ride creation attempt ${retryCount + 1} failed:`, error);
-          retryCount++;
-          if (retryCount === maxRetries) {
-            throw new Error('Failed to create ride after multiple attempts');
-          }
-          // Wait before retrying
-          await new Promise(resolve => setTimeout(resolve, 1000 * retryCount));
-        }
-      }
 
-      if (!rideResponse || !rideResponse.id) {
-        throw new Error('Failed to create ride. Please try again.');
-      }
+  console.log("Creating ride with:", JSON.stringify(rideData, null, 2));
 
-      // Navigate to booking screen with the ride data
+    // 🛰️ Send to backend
+    const rideResponse = await rideAPI.createRide(rideData);
+
+    if (!rideResponse || !rideResponse.id) {
+      throw new Error('Ride creation failed: no ride ID returned.');
+    }
+
+    console.log('✅ Ride created:', rideResponse.id);
+    
+    // Set ride ID and show waiting modal
+    setRideId(rideResponse.id);
+    setShowWaitingModal(true);
+
+    // 📦 Navigate to booking screen after a short delay
+    setTimeout(() => {
       router.push({
         pathname: "/(commuter)/booking",
         params: {
           rideId: rideResponse.id,
-          pickupLat: currentLocation.longitude.toString(),
-          pickupLng: currentLocation.latitude.toString(),
+          pickupLat: currentLocation.latitude.toString(),
+          pickupLng: currentLocation.longitude.toString(),
           destLat: destination.latitude.toString(),
           destLng: destination.longitude.toString(),
           destAddress: destination.address || searchText,
@@ -483,17 +452,20 @@ export default function LocationCommuter() {
           timestamp: new Date().toISOString()
         }
       });
+    }, 2000); // Show modal for 2 seconds before navigating
 
-    } catch (error) {
-      console.error('Error creating booking:', error);
-      Alert.alert(
-        'Booking Error',
-        error instanceof Error ? error.message : 'Failed to create booking. Please try again.'
-      );
-    } finally {
-      setIsBooking(false);
-    }
-  };
+  } catch (error) {
+    console.error('❌ Booking error:', error);
+    Alert.alert(
+      'Booking Error',
+      error instanceof Error ? error.message : 'Something went wrong. Please try again.'
+    );
+  } finally {
+    setIsBooking(false);
+  }
+};
+
+
 
   const calculateEstimatedFare = (start: Location, end: Location): number => {
     const distance = calculateDistance(start, end);
@@ -523,6 +495,7 @@ export default function LocationCommuter() {
         latitude: location.coords.latitude,
         longitude: location.coords.longitude,
         accuracy: location.coords.accuracy,
+         address: "Current Location"
       };
 
       if (isWithinNagaCity(newLocation)) {
@@ -581,6 +554,7 @@ export default function LocationCommuter() {
       }
     };
   }, []);
+
 
   // Add cache cleaning on component mount
   useEffect(() => {
@@ -765,18 +739,27 @@ export default function LocationCommuter() {
           <Ionicons name="close" size={24} color="#fff" />
         </TouchableOpacity>
         <View style={styles.searchContainer}>
-          <Ionicons name="location-outline" size={20} color="#0d4217" />
-          <TextInput
-            style={styles.searchInput}
+          <GooglePlacesAutocomplete
             placeholder="Where do you want to go?"
-            placeholderTextColor="#666"
-            value={searchText}
-            onChangeText={debouncedSearch}
-            returnKeyType="search"
+            onPlaceSelected={(place: any, details: any) => {
+              if (!details?.geometry?.location) return;
+              const loc = details.geometry.location;
+              const address = details.formatted_address || place.description;
+              const newDestination: Location = {
+                latitude: loc.lat,
+                longitude: loc.lng,
+                name: details.name || place.structured_formatting?.main_text,
+                address,
+                timestamp: Date.now(),
+              };
+              setDestination(newDestination);
+              updateMapRegion(newDestination);
+              handleSearch(address);
+            }}
+            minLength={2}
+            language="en"
+            types={"address"}
           />
-          {isLoading && (
-            <ActivityIndicator size="small" color="#0d4217" style={styles.searchLoading} />
-          )}
         </View>
       </View>
 
@@ -837,10 +820,7 @@ export default function LocationCommuter() {
               coordinates={pathCoordinates}
               strokeWidth={4}
               strokeColor="#0d4217"
-              lineDashPattern={[1]}
-              zIndex={1}
-              tappable={false}
-              geodesic={true}
+
             />
           )}
         </MapView>
@@ -926,6 +906,28 @@ export default function LocationCommuter() {
           </TouchableOpacity>
         </View>
       </View>
+
+      {/* Waiting for Rider Modal */}
+      <Modal
+        visible={showWaitingModal}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setShowWaitingModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalIconContainer}>
+              <Ionicons name="bicycle" size={60} color="#FFD700" />
+            </View>
+            <Text style={styles.modalTitle}>Waiting for Rider</Text>
+            <Text style={styles.modalSubtitle}>
+              We're finding the best rider for your trip...
+            </Text>
+            <ActivityIndicator size="large" color="#FFD700" style={styles.modalSpinner} />
+            <Text style={styles.modalRideId}>Ride ID: {rideId}</Text>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -1124,4 +1126,53 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#666'
   },
-}); 
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalContent: {
+    backgroundColor: '#fff',
+    borderRadius: 20,
+    padding: 30,
+    alignItems: 'center',
+    marginHorizontal: 40,
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 10,
+    },
+    shadowOpacity: 0.25,
+    shadowRadius: 20,
+    elevation: 10,
+  },
+  modalIconContainer: {
+    backgroundColor: '#0d4217',
+    borderRadius: 50,
+    padding: 20,
+    marginBottom: 20,
+  },
+  modalTitle: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#0d4217',
+    marginBottom: 10,
+    textAlign: 'center',
+  },
+  modalSubtitle: {
+    fontSize: 16,
+    color: '#666',
+    textAlign: 'center',
+    marginBottom: 20,
+    lineHeight: 22,
+  },
+  modalSpinner: {
+    marginBottom: 15,
+  },
+  modalRideId: {
+    fontSize: 12,
+    color: '#999',
+    fontFamily: 'monospace',
+  },
+});
