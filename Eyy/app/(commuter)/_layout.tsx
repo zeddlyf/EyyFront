@@ -69,8 +69,48 @@ export default function CommuterLayout() {
           tabBarStyle: { display: 'none' }, 
         }}
       />
+      <Tabs.Screen
+        name="notifications"
+        options={{
+          href: null,
+          tabBarShowLabel: false,
+          tabBarStyle: { display: 'none' }, 
+        }}
+      />
+      <Tabs.Screen
+        name="ride/[id]/feedback"
+        options={{
+          href: null,
+          tabBarShowLabel: false,
+          tabBarStyle: { display: 'none' }, 
+        }}
+      />
+      <Tabs.Screen
+        name="waitingcommuter"
+        options={{
+          href: null,
+          tabBarShowLabel: false,
+          tabBarStyle: { display: 'none' }, 
+        }}
+      />
+      <Tabs.Screen
+        name="chat"
+        options={{
+          href: null,
+          tabBarShowLabel: false,
+          tabBarStyle: { display: 'none' }, 
+        }}
+      />
+      <Tabs.Screen
+        name="contacts"
+        options={{
+          href: null,
+          tabBarShowLabel: false,
+          tabBarStyle: { display: 'none' }, 
+        }}
+      />
     </Tabs>
-    
-    
+
+
   );
-} 
+}

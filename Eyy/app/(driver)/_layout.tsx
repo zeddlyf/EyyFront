@@ -58,7 +58,48 @@ export default function DriverLayout() {
           tabBarStyle: { display: 'none' },
         }}
       />
+      <Tabs.Screen
+        name="chat"
+        options={{
+          href: null,
+          tabBarShowLabel: false,
+          tabBarStyle: { display: 'none' },
+        }}
+      />
+      <Tabs.Screen
+        name="notifications"
+        options={{
+          href: null,
+          tabBarShowLabel: false,
+          tabBarStyle: { display: 'none' },
+        }}
+      />
+      <Tabs.Screen
+        name="contacts"
+        options={{
+          href: null,
+          tabBarShowLabel: false,
+          tabBarStyle: { display: 'none' },
+        }}
+      />
+      <Tabs.Screen
+        name="pins"
+        options={{
+          href: null,
+          tabBarShowLabel: false,
+          tabBarStyle: { display: 'none' },
+        }}
+      />
+      <Tabs.Screen
+        name="emergency"
+        options={{
+          href: null,
+          tabBarShowLabel: false,
+          tabBarStyle: { display: 'none' },
+        }}
+      />
     </Tabs>
+    
     
     
   );

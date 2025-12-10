@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { View, StyleSheet, Text, SafeAreaView, Platform, StatusBar, Image, ScrollView, ActivityIndicator, TouchableOpacity, Alert, RefreshControl } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import NotificationBell from '../../components/NotificationBell';
 import { rideAPI } from '../../lib/api';
 import { useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -133,10 +134,7 @@ export default function HistoryRider() {
             />
           </View>
           <View style={styles.headerActions}>
-            <TouchableOpacity style={styles.notificationButton}>
-              <Ionicons name="notifications-outline" size={24} color="#FFD700" />
-              <View style={styles.notificationBadge} />
-            </TouchableOpacity>
+            <NotificationBell />
           </View>
         </View>
       </View>

@@ -8,6 +8,7 @@ import {
   Alert,
 } from 'react-native';
 import { useRouter } from 'expo-router';
+import { Platform } from 'react-native';
 import { useAuth } from '../../lib/AuthContext';
 
 export default function LoginScreen() {
@@ -92,14 +93,16 @@ export default function LoginScreen() {
           </Text>
         </TouchableOpacity>
 
-        <TouchableOpacity
-          style={styles.signupLink}
-          onPress={() => router.push('/signup')}
-        >
-          <Text style={styles.signupLinkText}>
-            Don't have an account? Sign up
-          </Text>
-        </TouchableOpacity>
+        {Platform.OS !== 'web' && (
+          <TouchableOpacity
+            style={styles.signupLink}
+            onPress={() => router.push('/signup')}
+          >
+            <Text style={styles.signupLinkText}>
+              Don't have an account? Sign up
+            </Text>
+          </TouchableOpacity>
+        )}
       </View>
     </View>
   );

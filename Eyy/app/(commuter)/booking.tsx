@@ -8,6 +8,7 @@ import { PathFinder, Point } from '../../utils/pathfinding';
 import { rideAPI, walletAPI } from '../../lib/api';
 import { MaterialIcons } from '@expo/vector-icons';
 import { RouteMap } from '../../utils/RouteMap';
+import { reverseGeocode, toHumanAddress } from '../../lib/geocoding';
 // Removed: import { useSocket } from '../../lib/socket-context';
 
 interface Location extends Point {
@@ -399,7 +400,7 @@ const handleChooseDestination = async () => {
     pickupLocation: {
       type: 'Point',
       coordinates: [currentLocation.longitude, currentLocation.latitude] as [number, number],
-      address: currentLocation.address || "Current Location"
+      address: toHumanAddress(currentLocation.address, currentLocation.latitude, currentLocation.longitude)
     },
     dropoffLocation: {
       type: 'Point',
@@ -467,11 +468,12 @@ const handleChooseDestination = async () => {
         accuracy: LOCATION_SETTINGS.HIGH_ACCURACY.accuracy,
       });
 
+      const initialAddr = await reverseGeocode(location.coords.latitude, location.coords.longitude);
       const newLocation: Location = {
         latitude: location.coords.latitude,
         longitude: location.coords.longitude,
         accuracy: location.coords.accuracy,
-         address: "Current Location"
+        address: initialAddr
       };
 
       if (isWithinNagaCity(newLocation)) {
@@ -496,7 +498,7 @@ const handleChooseDestination = async () => {
           timeInterval: LOCATION_SETTINGS.HIGH_ACCURACY.timeInterval,
           distanceInterval: LOCATION_SETTINGS.HIGH_ACCURACY.distanceInterval,
         },
-        (location) => {
+        async (location) => {
           const newLocation: Location = {
             latitude: location.coords.latitude,
             longitude: location.coords.longitude,
@@ -506,7 +508,12 @@ const handleChooseDestination = async () => {
           if (isWithinNagaCity(newLocation) && 
               location.coords.accuracy !== null && 
               location.coords.accuracy <= LOCATION_SETTINGS.MAX_ACCURACY_THRESHOLD) {
-            setCurrentLocation(newLocation);
+            try {
+              const addr = await reverseGeocode(newLocation.latitude, newLocation.longitude);
+              setCurrentLocation({ ...newLocation, address: addr });
+            } catch {
+              setCurrentLocation(newLocation);
+            }
             setLocationAccuracy(location.coords.accuracy);
             setLastLocationUpdate(Date.now());
           }
@@ -811,21 +818,23 @@ const handleChooseDestination = async () => {
     }
   };
 
-  const handleMapTap = (event: any) => {
+  const handleMapTap = async (event: any) => {
     const { latitude, longitude } = event.nativeEvent.coordinate;
     
     // Check if tapped location is within Naga City
+    let addr = `${latitude.toFixed(6)}, ${longitude.toFixed(6)}`;
+    try { addr = await reverseGeocode(latitude, longitude); } catch {}
     const tappedLocation: Location = {
       latitude,
       longitude,
-      address: `Tapped Location (${latitude.toFixed(6)}, ${longitude.toFixed(6)})`,
+      address: addr,
       timestamp: Date.now(),
     };
 
     if (isWithinNagaCity(tappedLocation)) {
       setMapTappedLocation(tappedLocation);
       setDestination(tappedLocation);
-      setSearchText(`Tapped Location (${latitude.toFixed(6)}, ${longitude.toFixed(6)})`);
+      setSearchText(addr);
       setShowMapTapHint(false);
       
       // Update map region to show the tapped location
@@ -1000,12 +1009,12 @@ const handleChooseDestination = async () => {
               origin={{
                 latitude: currentLocation.latitude,
                 longitude: currentLocation.longitude,
-                address: currentLocation.address || 'Current Location',
+                address: toHumanAddress(currentLocation.address, currentLocation.latitude, currentLocation.longitude),
               }}
               destination={{
                 latitude: destination.latitude,
                 longitude: destination.longitude,
-                address: destination.address || searchText || 'Selected Destination',
+                address: toHumanAddress(destination.address, destination.latitude, destination.longitude),
               }}
               onRouteReceived={setRouteInfo}
               style={styles.map}
@@ -1021,6 +1030,8 @@ const handleChooseDestination = async () => {
               mapType={mapStyle as MapType}
               showsTraffic={showTraffic}
               onPress={handleMapTap}
+              onRegionChange={() => setShowMapTapHint(false)}
+              onPanDrag={() => setShowMapTapHint(false)}
             >
               {currentLocation && (
                 <Marker
@@ -1048,7 +1059,7 @@ const handleChooseDestination = async () => {
           
           {/* Map Tap Hint Overlay */}
           {showMapTapHint && !destination && (
-            <View style={styles.mapTapHint}>
+            <View style={styles.mapTapHint} pointerEvents="none">
               <View style={styles.hintContainer}>
                 <Ionicons name="hand-left" size={24} color="#fff" />
                 <Text style={styles.hintText}>Tap anywhere on the map to set destination</Text>
@@ -1203,6 +1214,15 @@ const handleChooseDestination = async () => {
                         </View>
                       </View>
                     </View>
+                    <View style={{ flexDirection: 'row', gap: 12, marginTop: 12 }}>
+                      <TouchableOpacity
+                        style={{ flex: 1, backgroundColor: '#0d4217', paddingVertical: 12, borderRadius: 8, alignItems: 'center', flexDirection: 'row', justifyContent: 'center' }}
+                        onPress={() => router.push({ pathname: '/(commuter)/chat', params: { rideId: String(params.rideId || ''), conversationId: String(params.rideId || '') } })}
+                      >
+                        <Ionicons name="chatbubble" size={20} color="#fff" />
+                        <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 16, marginLeft: 8 }}>Message Driver</Text>
+                      </TouchableOpacity>
+                    </View>
                   </View>
                 </>
               ) : (
@@ -1247,7 +1267,7 @@ const handleChooseDestination = async () => {
                       <View style={styles.locationText}>
                         <Text style={styles.locationLabel}>From:</Text>
                         <Text style={styles.locationAddress} numberOfLines={2} ellipsizeMode="tail">
-                          {currentLocation.address || 'Current Location'}
+                          {toHumanAddress(currentLocation.address, currentLocation.latitude, currentLocation.longitude)}
                         </Text>
                       </View>
                     </View>
@@ -1257,7 +1277,7 @@ const handleChooseDestination = async () => {
                       <View style={styles.locationText}>
                         <Text style={styles.locationLabel}>To:</Text>
                         <Text style={styles.locationAddress} numberOfLines={2} ellipsizeMode="tail">
-                          {destination.address || searchText || 'Selected Destination'}
+                          {toHumanAddress(destination?.address, destination?.latitude, destination?.longitude)}
                         </Text>
                       </View>
                     </View>
@@ -1861,16 +1881,15 @@ const styles = StyleSheet.create({
   },
   mapTapHint: {
     position: 'absolute',
-    top: '50%',
     left: 20,
     right: 20,
-    transform: [{ translateY: -25 }],
+    bottom: 20,
     zIndex: 1000,
   },
   hintContainer: {
-    backgroundColor: 'rgba(13, 66, 23, 0.9)',
+    backgroundColor: 'rgba(13, 66, 23, 0.5)',
     borderRadius: 12,
-    padding: 16,
+    padding: 12,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',

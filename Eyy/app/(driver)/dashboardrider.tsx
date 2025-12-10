@@ -4,6 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { Link, useRouter } from 'expo-router';
 import MapView, { Marker, PROVIDER_GOOGLE, Callout, Polyline } from 'react-native-maps';
 import * as Location from 'expo-location';
+import * as Speech from 'expo-speech';
 import { rideAPI, userAPI } from '../../lib/api';
 import { useSocket } from '../../lib/socket-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -11,6 +12,9 @@ import { GOOGLE_MAPS_ENDPOINTS, buildGoogleMapsUrl, TRAVEL_MODES } from '../../l
 import { RouteMap } from '../../utils/RouteMap';
 import { PathFinder, Point } from '../../utils/pathfinding';
 import upateDriverAvailability from '../../lib/api';
+// geocoding module not found – stubbing minimal helpers
+const reverseGeocode = async (lat: number, lng: number): Promise<string> => `${lat.toFixed(6)},${lng.toFixed(6)}`;
+const toHumanAddress = (raw?: string, lat?: number, lng?: number): string => raw || `${lat?.toFixed(6)},${lng?.toFixed(6)}`;
 
 interface Location {
   latitude: number;
@@ -73,6 +77,8 @@ export default function DashboardRider() {
   const [routeInfo, setRouteInfo] = useState<RouteInfo | null>(null);
   const [routeAlternatives, setRouteAlternatives] = useState<any[]>([]);
   const [isNavigating, setIsNavigating] = useState(false);
+  const [atPickup, setAtPickup] = useState(false);
+  const [ttsEnabled, setTtsEnabled] = useState(true);
   const [region, setRegion] = useState({
     latitude: 13.6195,
     longitude: 123.1814,
@@ -165,8 +171,8 @@ export default function DashboardRider() {
         if (status !== 'granted') return;
         locationSubscription = await Location.watchPositionAsync({
           accuracy: Location.Accuracy.Balanced,
-          timeInterval: 1000,
-          distanceInterval: 1,
+          timeInterval: 30000,
+          distanceInterval: 5,
         }, async (loc) => {
           const newLoc = { latitude: loc.coords.latitude, longitude: loc.coords.longitude };
           setCurrentLocation(newLoc);
@@ -182,7 +188,6 @@ export default function DashboardRider() {
             try { await userAPI.updateDriverLocation(newLoc.latitude, newLoc.longitude); } catch {}
           }
         });
-        // Extra safety emission at 2s cadence
         interval = setInterval(async () => {
           if (!currentLocation) return;
           if (socket && isConnected && driverId) {
@@ -194,7 +199,7 @@ export default function DashboardRider() {
               status: isNavigating ? 'on-trip' : 'available'
             });
           }
-        }, 2000);
+        }, 30000);
       } catch {}
     };
     if (isAvailable) startTracking();
@@ -359,13 +364,15 @@ export default function DashboardRider() {
       const response = await rideAPI.getNearbyRides(
         currentLocation.latitude,
         currentLocation.longitude,
-        10000 // 10km radius
+        10000, // 10km radius
+        ['pending', 'waiting', 'requested']
       );
       console.log('Raw response from getNearbyRides:', response);
       // Filter for pending ride requests
-      const pendingRides = response.filter((ride: RideRequest) => 
-        ride.status === 'pending' || ride.status === 'waiting'
-      );
+      const pendingRides = response.filter((ride: RideRequest) => {
+        const s = String(ride.status || '').toLowerCase();
+        return s === 'pending' || s === 'waiting' || s === 'requested';
+      });
       console.log('Filtered pending rides:', pendingRides);
       console.log('Sample ride object:', pendingRides[0]);
       setRideRequests(pendingRides);
@@ -399,19 +406,32 @@ export default function DashboardRider() {
       if (acceptedRideData) {
         setAcceptedRide(acceptedRideData);
         setIsNavigating(true);
-        
+
         // Clear other ride requests
         setRideRequests([]);
         setSelectedRide(null);
-        
+
         // Fetch route to pickup location
         const pickupLocation: Location = {
           latitude: acceptedRideData.pickupLocation.coordinates[1],
           longitude: acceptedRideData.pickupLocation.coordinates[0],
           address: acceptedRideData.pickupLocation.address,
         };
-        
-        await fetchRoute(currentLocation, pickupLocation);
+        const distanceToPickup = calculateDistance(
+          currentLocation.latitude,
+          currentLocation.longitude,
+          pickupLocation.latitude,
+          pickupLocation.longitude
+        );
+        if (distanceToPickup > 50) {
+          await fetchRoute(currentLocation, pickupLocation);
+          const addr = toHumanAddress(pickupLocation.address, pickupLocation.latitude, pickupLocation.longitude);
+          if (ttsEnabled) Speech.speak(`Navigating to pickup at ${addr}`);
+          setRouteInfo((prev) => prev ? { ...prev, navigationStatus: 'navigating_to_pickup' } : { distance: { text: '', value: 0 }, duration: { text: '', value: 0 }, polyline: { points: '' }, steps: [], legs: [], navigationStatus: 'navigating_to_pickup' });
+        } else {
+          setAtPickup(true);
+          setRouteInfo((prev) => prev ? { ...prev, navigationStatus: 'navigating_to_destination' } : prev);
+        }
       }
     } catch (error) {
       console.error('Error accepting ride:', error);
@@ -441,6 +461,7 @@ export default function DashboardRider() {
           navigationStatus: 'navigating_to_destination'
         });
       }
+      if (ttsEnabled) Speech.speak('Starting navigation to destination');
       
       Alert.alert(
         'Navigation Started', 
@@ -453,6 +474,17 @@ export default function DashboardRider() {
       Alert.alert('Navigation Error', 'Failed to start navigation. Please try again.');
     }
   };
+
+  useEffect(() => {
+    if (!acceptedRide) return;
+    const pickupLat = acceptedRide.pickupLocation.coordinates[1];
+    const pickupLng = acceptedRide.pickupLocation.coordinates[0];
+    const dist = calculateDistance(currentLocation.latitude, currentLocation.longitude, pickupLat, pickupLng);
+    if (dist <= 50 && !atPickup) {
+      setAtPickup(true);
+      if (ttsEnabled) Speech.speak('Arrived at pickup point');
+    }
+  }, [currentLocation.latitude, currentLocation.longitude, acceptedRide]);
 
   const completeRide = async () => {
     if (!acceptedRide) return;
@@ -573,6 +605,21 @@ export default function DashboardRider() {
     }
   }, [isAvailable, isNavigating, currentLocation.latitude, currentLocation.longitude]);
 
+  // Socket triggers for immediate updates when rides change
+  useEffect(() => {
+    const s = socket;
+    if (!s || !isAvailable) return;
+    const refresh = () => { fetchRideRequests(); };
+    s.on('rideCreated', refresh);
+    s.on('rideUpdated', refresh);
+    s.on('rideCancelled', refresh);
+    return () => {
+      s.off('rideCreated', refresh);
+      s.off('rideUpdated', refresh);
+      s.off('rideCancelled', refresh);
+    };
+  }, [socket, isAvailable]);
+
   return (
     <SafeAreaView style={styles.container}>
       {/* Header */}
@@ -611,9 +658,9 @@ export default function DashboardRider() {
                 address: "Your Location"
               }}
               destination={{
-                latitude: acceptedRide.dropoffLocation.coordinates[1],
-                longitude: acceptedRide.dropoffLocation.coordinates[0],
-                address: acceptedRide.dropoffLocation.address
+                latitude: (routeInfo?.navigationStatus === 'navigating_to_pickup' ? acceptedRide.pickupLocation.coordinates[1] : acceptedRide.dropoffLocation.coordinates[1]),
+                longitude: (routeInfo?.navigationStatus === 'navigating_to_pickup' ? acceptedRide.pickupLocation.coordinates[0] : acceptedRide.dropoffLocation.coordinates[0]),
+                address: (routeInfo?.navigationStatus === 'navigating_to_pickup' ? acceptedRide.pickupLocation.address : acceptedRide.dropoffLocation.address)
               }}
               travelMode={TRAVEL_MODES.DRIVING}
               showRouteInfo={true}
@@ -697,8 +744,11 @@ export default function DashboardRider() {
                 </View>
               </View>
               <Text style={styles.routeInfo}>
-                {routeInfo.legs?.[0]?.distance?.text} • {routeInfo.legs?.[0]?.duration?.text}
+                {(routeInfo.legs?.[0]?.distance?.text || '')} • {(routeInfo.legs?.[0]?.duration?.text || '')}
               </Text>
+              {routeInfo?.navigationStatus === 'navigating_to_pickup' && (
+                <Text style={styles.routeInfo}>Pickup: {toHumanAddress(acceptedRide?.pickupLocation.address, acceptedRide?.pickupLocation.coordinates[1], acceptedRide?.pickupLocation.coordinates[0])}</Text>
+              )}
               {routeAlternatives.length > 1 && (
                 <View style={{ marginTop: 6 }}>
                   <Text style={{ color: '#666' }}>Alternatives:</Text>
@@ -707,6 +757,11 @@ export default function DashboardRider() {
                       • {r.legs?.[0]?.distance?.text} • {r.legs?.[0]?.duration_in_traffic?.text || r.legs?.[0]?.duration?.text}
                     </Text>
                   ))}
+                </View>
+              )}
+              {atPickup && (
+                <View style={{ marginTop: 8 }}>
+                  <Text style={{ color: '#28a745', fontWeight: 'bold' }}>Arrived at pickup point</Text>
                 </View>
               )}
             </View>
@@ -725,6 +780,21 @@ export default function DashboardRider() {
                   <Text style={styles.statusText}>In Progress</Text>
                 </View>
               </View>
+              {acceptedRide && (
+                <View style={{ paddingVertical: 8, paddingHorizontal: 12, backgroundColor: '#fff', borderRadius: 10, marginBottom: 10 }}>
+                  <Text style={{ color: '#0d4217', fontWeight: 'bold' }}>
+                    {(routeInfo?.navigationStatus === 'navigating_to_pickup') ? 'Pickup:' : 'Destination:'}
+                  </Text>
+                  <Text style={{ color: '#333' }} numberOfLines={2}>
+                    {(routeInfo?.navigationStatus === 'navigating_to_pickup')
+                      ? toHumanAddress(acceptedRide.pickupLocation.address, acceptedRide.pickupLocation.coordinates[1], acceptedRide.pickupLocation.coordinates[0])
+                      : toHumanAddress(acceptedRide.dropoffLocation.address, acceptedRide.dropoffLocation.coordinates[1], acceptedRide.dropoffLocation.coordinates[0])}
+                  </Text>
+                  <Text style={{ color: '#666', marginTop: 4 }}>
+                    ETA: {routeInfo?.legs?.[0]?.duration?.text || '—'}
+                  </Text>
+                </View>
+              )}
               
               {acceptedRide && (
                 <ScrollView style={styles.rideDetails} showsVerticalScrollIndicator={false}>
@@ -758,7 +828,14 @@ export default function DashboardRider() {
                       <Ionicons name="navigate" size={20} color="#fff" />
                       <Text style={styles.navigationButtonText}>Start Navigation</Text>
                     </TouchableOpacity>
-                    
+                    <TouchableOpacity
+                      style={styles.navigationButton}
+                      onPress={() => router.push({ pathname: '/(driver)/chat', params: { rideId: acceptedRide._id || acceptedRide.id || '', conversationId: acceptedRide._id || acceptedRide.id || '' } })}
+                    >
+                      <Ionicons name="chatbubble" size={20} color="#fff" />
+                      <Text style={styles.navigationButtonText}>Message</Text>
+                    </TouchableOpacity>
+
                     <TouchableOpacity
                       style={styles.completeButton}
                       onPress={completeRide}

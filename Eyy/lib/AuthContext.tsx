@@ -62,11 +62,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
   
   const updateUser = (userData: any) => {
-    setUser({ ...user, ...userData });
-    AsyncStorage.setItem('user', JSON.stringify({ ...user, ...userData }));
-    // Update user state in other components
-    setUser({ ...user, ...userData });
-    
+    setUser((prev) => {
+      const next = { ...(prev || {}), ...(userData || {}) };
+      AsyncStorage.setItem('user', JSON.stringify(next));
+      return next;
+    });
   };
 
   return (

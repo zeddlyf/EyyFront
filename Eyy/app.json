@@ -4,13 +4,13 @@
     "slug": "EyyTrike",
     "version": "1.0.0",
     "sdkVersion": "54.0.0",
-    "icon": "./assets/images/EyyTrikeLogo2.png",
+    "icon": "./assets/images/EyytrikeLogo2.png",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
     "scheme": "eyytrike",
     "splash": {
       "resizeMode": "contain",
-      "image": "./assets/images/EyyTrikeLogo2.png",
+      "image": "./assets/images/EyytrikeLogo2.png",
       "backgroundColor": "#0d4217"
     },
     "assetBundlePatterns": [
@@ -27,7 +27,7 @@
     "android": {
       "adaptiveIcon": {
         "backgroundColor": "#0B4619",
-        "foregroundImage": "./assets/images/eyytrike1.png"
+        "foregroundImage": "./assets/images/EyytrikeLogo2.png"
       },
       "package": "com.anonymous.eyytrike",
       "permissions": [

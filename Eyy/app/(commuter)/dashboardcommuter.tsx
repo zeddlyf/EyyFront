@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { View, StyleSheet, Text, SafeAreaView, Platform, StatusBar, Image, TouchableOpacity, Alert, Animated } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import NotificationBell from '../../components/NotificationBell';
 import { useRouter } from 'expo-router';
 import MapView, { Marker, PROVIDER_GOOGLE } from 'react-native-maps';
 import * as Location from 'expo-location';
@@ -159,7 +160,7 @@ export default function DashboardCommuter() {
             style={styles.logoImage}
             resizeMode="contain"
           />
-          <Ionicons name="notifications-outline" size={24} color="#FFD700" />
+          <NotificationBell />
         </View>
       </View>
 

@@ -1,13 +1,14 @@
-import React, { useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { View, StyleSheet, Text, SafeAreaView, Platform, StatusBar, TouchableOpacity, Image, Switch, ScrollView, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import { authAPI } from '../../lib/api';
+import { authAPI, userAPI } from '../../lib/api';
 import { useAuth } from '../../lib/AuthContext';
+import { useFocusEffect } from '@react-navigation/native';
 
 export default function MenuCommuter() {
   const router = useRouter();
-  const { user, logout } = useAuth();
+  const { user, logout, updateUser } = useAuth();
   const [silentMode, setSilentMode] = useState(false);
   const [darkMode, setDarkMode] = useState(false);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
@@ -28,6 +29,30 @@ export default function MenuCommuter() {
   const handleEditProfile = () => {
     router.push('/editprofilecommuter');
   };
+
+  useFocusEffect(
+    useCallback(() => {
+      let active = true
+      ;(async () => {
+        try {
+          const profile = await userAPI.getProfile()
+          if (active) updateUser(profile)
+        } catch {}
+      })()
+      return () => { active = false }
+    }, [])
+  )
+
+  useEffect(() => {
+    if (!user) {
+      ;(async () => {
+        try {
+          const profile = await userAPI.getProfile()
+          updateUser(profile)
+        } catch {}
+      })()
+    }
+  }, [user])
 
   return (
     <SafeAreaView style={styles.container}>
@@ -101,6 +126,17 @@ export default function MenuCommuter() {
               </View>
               <Ionicons name="create-outline" size={20} color="#fff" style={styles.chevron} />
             </TouchableOpacity>
+
+          <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/(commuter)/contacts')}>
+            <Ionicons name="book" size={20} color="#fff" />
+            <View style={styles.menuItemContent}>
+              <Text style={styles.menuText}>Save Contact</Text>
+              <Text style={styles.menuSubText}>Manage saved contacts</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={20} color="#fff" style={styles.chevron} />
+          </TouchableOpacity>
+
+          
           </View>
 
           {/* Settings Section */}

@@ -22,6 +22,7 @@ const api = axios.create({
   timeout: 30000, // Increased timeout to 30 seconds
 });
 
+
 // Add request interceptor for authentication
 api.interceptors.request.use(
   async (config) => {
@@ -296,10 +297,10 @@ const rideAPI = {
     const response = await api.get(`/api/rides/${id}`);
     return response.data;
   },
-  getNearbyRides: async (latitude: number, longitude: number, maxDistance = 5000) => {
-    const response = await api.get('/api/rides/nearby', {
-      params: { latitude, longitude, maxDistance },
-    });
+  getNearbyRides: async (latitude: number, longitude: number, maxDistance = 5000, status?: string | string[]) => {
+    const params: any = { latitude, longitude, maxDistance };
+    if (status) params.status = status;
+    const response = await api.get('/api/rides/nearby', { params });
     return response.data;
   },
   acceptRide: async (id: string) => {
@@ -351,6 +352,18 @@ const walletAPI = {
     const response = await api.post('/api/wallets/withdraw', { amount });
     return response.data;
   },
+  getWallet: () => api.get('/api/wallet'),
+  initializeWallet: () => api.post('/api/wallet/init'),
+  topUp: (amount: number, paymentMethod?: string) => 
+    api.post('/api/wallet/topup', { amount, paymentMethod }),
+  cashOut: (data: {
+    amount: number;
+    bankCode: string;
+    accountNumber: string;
+    accountHolderName: string;
+  }) => api.post('/api/wallet/cashout', data),
+  getTransactionHistory: (params?: { page?: number; limit?: number }) => 
+    api.get('/api/wallet/transactions', { params }),
 };
 
 // Payment API endpoints
@@ -375,7 +388,9 @@ const paymentAPI = {
     const response = await api.delete(`/api/payments/${id}`);
     return response.data;
   },
-};
+}
+;
+
 
 // Utility functions
 const apiUtils = {
@@ -459,3 +474,42 @@ export { authAPI, userAPI, rideAPI, walletAPI, paymentAPI, apiUtils };
 export type { UserData, AuthResponse, UserProfile, Address };
 
 export default api;
+
+// Contacts V1
+function mapList(data: any) {
+  const arr = Array.isArray(data?.data) ? data.data : []
+  return arr.map((d: any) => ({ id: d.id, ...(d.attributes || {}) }))
+}
+function mapOne(data: any) {
+  const d = data?.data
+  return d ? { id: d.id, ...(d.attributes || {}) } : null
+}
+
+const contactsV1 = {
+  list: async (params?: { page?: number; limit?: number; includeDeleted?: boolean }) => {
+    const response = await api.get('/api/v1/contacts', { params })
+    return { items: mapList(response.data), meta: response.data?.meta || {} }
+  },
+  create: async (payload: { userType: 'driver' | 'commuter'; name: string; phone: string; email?: string; metadata?: any }) => {
+    const response = await api.post('/api/v1/contacts', payload)
+    return mapOne(response.data)
+  },
+  get: async (id: string) => {
+    const response = await api.get(`/api/v1/contacts/${id}`)
+    return mapOne(response.data)
+  },
+  update: async (id: string, patch: any) => {
+    const response = await api.put(`/api/v1/contacts/${id}`, patch)
+    return mapOne(response.data)
+  },
+  delete: async (id: string) => {
+    const response = await api.delete(`/api/v1/contacts/${id}`)
+    return mapOne(response.data)
+  },
+  listByType: async (type: 'driver' | 'commuter') => {
+    const response = await api.get(`/api/v1/contacts/user/${type}`)
+    return mapList(response.data)
+  }
+}
+
+export { contactsV1 };
