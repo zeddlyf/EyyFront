@@ -17,9 +17,9 @@ export default function ProfileCommuter() {
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
 
   // Helper function to fetch wallet and transactions
-  const fetchWalletAndTransactions = async () => {
-    setLoading(true);
-    setError(null);
+    const fetchWalletAndTransactions = async () => {
+      setLoading(true);
+      setError(null);
     
     // Fetch wallet first (critical - show errors if this fails)
     let wallet;
@@ -52,7 +52,7 @@ export default function ProfileCommuter() {
       } else {
         // Fallback to getWallets if getWallet fails
         try {
-          const wallets = await walletAPI.getWallets();
+        const wallets = await walletAPI.getWallets();
           wallet = Array.isArray(wallets) ? wallets[0] : wallets;
         } catch (fallbackErr) {
           const errorMessage = walletErr?.response?.data?.message || walletErr?.message || 'Failed to load wallet';
@@ -83,12 +83,21 @@ export default function ProfileCommuter() {
     } else {
       // Method 2: Try wallet transaction history endpoint
       try {
-        const transactionsResponse = await walletAPI.getTransactionHistory();
+        const transactionsResponse = await walletAPI.getTransactionHistory({ limit: 50 });
         const transactionsData = transactionsResponse?.data || transactionsResponse;
         // Handle both array and object with array property
         transactionsArray = Array.isArray(transactionsData) 
           ? transactionsData 
           : (transactionsData?.transactions || transactionsData?.data || transactionsData?.history || []);
+        
+        // Sort by date (newest first)
+        if (transactionsArray.length > 0) {
+          transactionsArray.sort((a: any, b: any) => {
+            const dateA = new Date(a.createdAt || a.date || a.timestamp || 0).getTime();
+            const dateB = new Date(b.createdAt || b.date || b.timestamp || 0).getTime();
+            return dateB - dateA;
+          });
+        }
       } catch (txErr: any) {
         console.log('Wallet transaction history endpoint failed:', txErr?.message || txErr);
         
@@ -109,7 +118,7 @@ export default function ProfileCommuter() {
         // Method 4: Try payments API as fallback (only if wallet transactions fail)
         if (transactionsArray.length === 0) {
           try {
-            const payments = await paymentAPI.getPayments();
+        const payments = await paymentAPI.getPayments();
             const paymentsArray = Array.isArray(payments) ? payments : (payments?.data || []);
             // Filter payments related to this user/wallet
             transactionsArray = paymentsArray.map((payment: any) => ({
@@ -128,9 +137,76 @@ export default function ProfileCommuter() {
       }
     }
     
-    setTransactions(transactionsArray);
+    // Filter and format transactions to ensure deposits are included
+    const formattedTransactions = transactionsArray.map((tx: any) => {
+      // Normalize transaction type
+      let type = tx.type || tx.transactionType || tx.category || 'payment';
+      
+      // If it's a topup/deposit related transaction, ensure type is 'deposit'
+      if (
+        tx.description?.toLowerCase().includes('topup') ||
+        tx.description?.toLowerCase().includes('deposit') ||
+        tx.description?.toLowerCase().includes('top up') ||
+        tx.note?.toLowerCase().includes('topup') ||
+        tx.note?.toLowerCase().includes('deposit') ||
+        tx.reference?.toLowerCase().includes('topup') ||
+        (tx.amount > 0 && !tx.type && !tx.transactionType)
+      ) {
+        type = 'deposit';
+      }
+      
+      return {
+        ...tx,
+        type: type,
+        // Ensure amount is positive for deposits
+        amount: type === 'deposit' ? Math.abs(tx.amount || tx.value || 0) : (tx.amount || tx.value || 0),
+      };
+    });
+    
+    // Sort by date (newest first)
+    formattedTransactions.sort((a: any, b: any) => {
+      const dateA = new Date(a.createdAt || a.date || a.timestamp || 0).getTime();
+      const dateB = new Date(b.createdAt || b.date || b.timestamp || 0).getTime();
+      return dateB - dateA;
+    });
+    
+    setTransactions(formattedTransactions);
     setLastRefresh(new Date());
     setLoading(false);
+    console.log(`Loaded ${formattedTransactions.length} transactions`);
+    
+    // Check for pending transactions and verify them (async, don't block)
+    const pendingTransactions = formattedTransactions.filter(
+      tx => (tx.status === 'pending' || tx.status === 'PENDING') && (tx.referenceId || tx.xenditId)
+    );
+    
+    if (pendingTransactions.length > 0) {
+      console.log(`Found ${pendingTransactions.length} pending transactions, verifying...`);
+      // Verify each pending transaction
+      (async () => {
+        for (const tx of pendingTransactions) {
+          try {
+            const verifyResponse = await walletAPI.verifyTransaction({
+              referenceId: tx.referenceId,
+              xenditId: tx.xenditId
+            });
+            const verifyData = verifyResponse?.data || verifyResponse;
+            console.log('Transaction verification result:', verifyData);
+            
+            // If transaction was updated, refresh wallet
+            if (verifyData.status === 'updated' || verifyData.status === 'completed') {
+              // Refresh after verification
+              setTimeout(() => {
+                fetchWalletAndTransactions();
+              }, 1000);
+              break; // Only verify one at a time to avoid race conditions
+            }
+          } catch (verifyErr) {
+            console.log('Could not verify transaction:', verifyErr);
+          }
+        }
+      })();
+    }
   };
 
   // Initial load
@@ -141,10 +217,19 @@ export default function ProfileCommuter() {
   // Refresh when screen comes into focus (e.g., returning from payment)
   useFocusEffect(
     useCallback(() => {
-      // Small delay to ensure webhook has processed
+      // Longer delay to ensure webhook has processed payment
       const timer = setTimeout(() => {
+        console.log('Screen focused - refreshing wallet and transactions');
         fetchWalletAndTransactions();
-      }, 1000);
+        
+        // Also do a delayed refresh in case webhook is still processing
+        const delayedTimer = setTimeout(() => {
+          console.log('Delayed refresh after payment');
+          fetchWalletAndTransactions();
+        }, 5000);
+        
+        return () => clearTimeout(delayedTimer);
+      }, 2000);
       
       return () => clearTimeout(timer);
     }, [])
@@ -166,14 +251,15 @@ export default function ProfileCommuter() {
     };
   }, []);
 
-  // Periodic refresh to catch new transactions (every 15 seconds when screen is active)
+  // Periodic refresh to catch new transactions (every 10 seconds when screen is active)
+  // More frequent after payment to catch webhook updates
   useEffect(() => {
     const interval = setInterval(() => {
       // Only refresh if not currently loading
       if (!loading) {
         fetchWalletAndTransactions();
       }
-    }, 15000); // Refresh every 15 seconds
+    }, 10000); // Refresh every 10 seconds (more frequent to catch payment updates)
 
     return () => clearInterval(interval);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -207,7 +293,7 @@ export default function ProfileCommuter() {
       
       // If no payment URL, check if funds were added directly (test mode)
       if (topUpData?.success || topUpData?.amount) {
-        // Refresh wallet and transactions
+      // Refresh wallet and transactions
         await fetchWalletAndTransactions();
         setDepositing(false);
         return;
@@ -402,7 +488,7 @@ export default function ProfileCommuter() {
         <View style={styles.transactionSection}>
           <View style={styles.sectionHeader}>
             <View style={{ flex: 1 }}>
-              <Text style={styles.sectionTitle}>Transaction History</Text>
+            <Text style={styles.sectionTitle}>Transaction History</Text>
               {lastRefresh && (
                 <Text style={styles.lastUpdatedText}>
                   Last updated: {lastRefresh.toLocaleTimeString()}
@@ -464,52 +550,52 @@ export default function ProfileCommuter() {
                   
                   return (
                     <View style={styles.transactionCard} key={transactionId}>
-                      <View style={styles.transactionHeader}>
-                        <View style={styles.transactionIcon}>
-                          <Ionicons 
+                    <View style={styles.transactionHeader}>
+                      <View style={styles.transactionIcon}>
+                        <Ionicons 
                             name={getTransactionIcon(transactionType)} 
-                            size={20} 
+                          size={20} 
                             color={getTransactionColor(transactionType)} 
-                          />
-                        </View>
-                        <View style={styles.transactionInfo}>
-                          <Text style={styles.transactionTitle}>
+                        />
+                      </View>
+                      <View style={styles.transactionInfo}>
+                        <Text style={styles.transactionTitle}>
                             {getTransactionTitle(transactionDescription)}
-                          </Text>
-                          <Text style={styles.transactionDate}>
+                        </Text>
+                        <Text style={styles.transactionDate}>
                             {transactionDate ? formatTransactionDate(transactionDate) : 'Unknown date'}
-                          </Text>
-                        </View>
-                        <View style={styles.transactionAmount}>
-                          <Text style={[
-                            styles.amount,
+                        </Text>
+                      </View>
+                      <View style={styles.transactionAmount}>
+                        <Text style={[
+                          styles.amount,
                             { color: getAmountColor(transactionType) }
-                          ]}>
+                        ]}>
                             {transactionAmount ? `${transactionAmount > 0 ? '+' : ''}₱${Math.abs(transactionAmount).toFixed(2)}` : '₱0.00'}
-                          </Text>
-                          <View style={[
-                            styles.statusBadge,
+                        </Text>
+                        <View style={[
+                          styles.statusBadge,
                             { backgroundColor: getStatusColor(transactionStatus) }
-                          ]}>
-                            <Text style={styles.statusText}>
+                        ]}>
+                          <Text style={styles.statusText}>
                               {getStatusText(transactionStatus)}
-                            </Text>
-                          </View>
+                          </Text>
                         </View>
                       </View>
-                      
-                      {transactionDescription && transactionDescription !== tx.reference && (
-                        <Text style={styles.transactionDescription}>
-                          {transactionDescription}
-                        </Text>
-                      )}
-                      
-                      {(tx.reference || tx.referenceNumber || tx.transactionId) && (
-                        <Text style={styles.transactionReference}>
-                          Ref: {tx.reference || tx.referenceNumber || tx.transactionId}
-                        </Text>
-                      )}
                     </View>
+                    
+                      {transactionDescription && transactionDescription !== tx.reference && (
+                      <Text style={styles.transactionDescription}>
+                          {transactionDescription}
+                      </Text>
+                    )}
+                    
+                      {(tx.reference || tx.referenceNumber || tx.transactionId) && (
+                      <Text style={styles.transactionReference}>
+                          Ref: {tx.reference || tx.referenceNumber || tx.transactionId}
+                      </Text>
+                    )}
+                  </View>
                   );
                 })
               )}

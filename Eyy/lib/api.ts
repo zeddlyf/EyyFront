@@ -381,6 +381,8 @@ const walletAPI = {
   }) => api.post('/api/wallet/cashout', data),
   getTransactionHistory: (params?: { page?: number; limit?: number }) => 
     api.get('/api/wallet/transactions', { params }),
+  verifyTransaction: (data: { referenceId?: string; xenditId?: string }) =>
+    api.post('/api/wallet/verify-transaction', data),
 };
 
 // Payment API endpoints

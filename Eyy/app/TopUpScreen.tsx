@@ -21,14 +21,15 @@ const TopUpScreen = () => {
     try {
       setIsLoading(true);
       const response = await walletAPI.topUp(Number(amount), paymentMethod);
+      const responseData = response?.data || response;
       
-      if (response.paymentUrl) {
+      if (responseData?.paymentUrl || responseData?.url) {
         // Navigate to payment WebView screen
         router.push({
           pathname: '/PaymentWebView',
           params: { 
-            url: response.paymentUrl,
-            referenceId: response.referenceId || '',
+            url: responseData.paymentUrl || responseData.url,
+            referenceId: responseData.referenceId || responseData.id || '',
             amount: amount
           }
         });

@@ -1,0 +1,143 @@
+diff --git a/node_modules/expo-dev-launcher/android/src/debug/java/expo/modules/devlauncher/react/DevLauncherBridgeDevSupportManager.kt b/node_modules/expo-dev-launcher/android/src/debug/java/expo/modules/devlauncher/react/DevLauncherBridgeDevSupportManager.kt
+index 2522b4d..ceb57d1 100644
+--- a/node_modules/expo-dev-launcher/android/src/debug/java/expo/modules/devlauncher/react/DevLauncherBridgeDevSupportManager.kt
++++ b/node_modules/expo-dev-launcher/android/src/debug/java/expo/modules/devlauncher/react/DevLauncherBridgeDevSupportManager.kt
+@@ -50,7 +50,7 @@ class DevLauncherBridgeDevSupportManager(
+   @get:JvmName("getjSBundleURLForRemoteDebugging")
+   override val jSBundleURLForRemoteDebugging: String? = null
+ 
+-  override fun showNewJavaError(message: String?, e: Throwable) {
++  override fun showNewJavaError(message: String?, e: Throwable?) {
+     Log.e("DevLauncher", "$message", e)
+     if (!DevLauncherController.wasInitialized()) {
+       Log.e(
+@@ -71,8 +71,17 @@ class DevLauncherBridgeDevSupportManager(
+     DevLauncherErrorActivity.showError(activity, DevLauncherAppError(message, cause))
+   }
+ 
++  override fun getUniqueTag(): String {
++    return "DevLauncherApp-Bridge"
++  }
++
+   override val uniqueTag: String
+-    get() = "DevLauncherApp-Bridge"
++    get() = getUniqueTag()
++
++  override fun loadSplitBundleFromServer(bundlePath: String, callback: com.facebook.react.devsupport.interfaces.DevSplitBundleCallback) {
++    // No-op implementation for compatibility
++    callback.onFailure(Exception("Split bundle loading not supported in dev launcher"))
++  }
+ 
+   override fun startInspector() {
+     // no-op for the default `startInspector` which would be implicitly called
+diff --git a/node_modules/expo-dev-launcher/android/src/debug/java/expo/modules/devlauncher/react/DevLauncherBridgelessDevSupportManager.kt b/node_modules/expo-dev-launcher/android/src/debug/java/expo/modules/devlauncher/react/DevLauncherBridgelessDevSupportManager.kt
+index 4467e52..86c021d 100644
+--- a/node_modules/expo-dev-launcher/android/src/debug/java/expo/modules/devlauncher/react/DevLauncherBridgelessDevSupportManager.kt
++++ b/node_modules/expo-dev-launcher/android/src/debug/java/expo/modules/devlauncher/react/DevLauncherBridgelessDevSupportManager.kt
+@@ -49,7 +49,7 @@ class DevLauncherBridgelessDevSupportManager(
+   @get:JvmName("getjSBundleURLForRemoteDebugging")
+   override val jSBundleURLForRemoteDebugging: String? = null
+ 
+-  override fun showNewJavaError(message: String?, e: Throwable) {
++  override fun showNewJavaError(message: String?, e: Throwable?) {
+     Log.e("DevLauncher", "$message", e)
+     if (!DevLauncherController.wasInitialized()) {
+       Log.e("DevLauncher", "DevLauncher wasn't initialized. Couldn't intercept native error handling.")
+@@ -66,8 +66,17 @@ class DevLauncherBridgelessDevSupportManager(
+     DevLauncherErrorActivity.showError(activity, DevLauncherAppError(message, e))
+   }
+ 
++  override fun getUniqueTag(): String {
++    return "DevLauncherApp-Bridgeless"
++  }
++
+   override val uniqueTag: String
+-    get() = "DevLauncherApp-Bridgeless"
++    get() = getUniqueTag()
++
++  override fun loadSplitBundleFromServer(bundlePath: String, callback: com.facebook.react.devsupport.interfaces.DevSplitBundleCallback) {
++    // No-op implementation for compatibility
++    callback.onFailure(Exception("Split bundle loading not supported in dev launcher"))
++  }
+ 
+   override fun startInspector() {
+     // no-op for the default `startInspector` which would be implicitly called
+diff --git a/node_modules/expo-dev-launcher/android/src/main/java/com/facebook/react/devsupport/NonFinalBridgeDevSupportManager.kt b/node_modules/expo-dev-launcher/android/src/main/java/com/facebook/react/devsupport/NonFinalBridgeDevSupportManager.kt
+index 44458f9..89b9e63 100644
+--- a/node_modules/expo-dev-launcher/android/src/main/java/com/facebook/react/devsupport/NonFinalBridgeDevSupportManager.kt
++++ b/node_modules/expo-dev-launcher/android/src/main/java/com/facebook/react/devsupport/NonFinalBridgeDevSupportManager.kt
+@@ -14,8 +14,8 @@ import com.facebook.react.bridge.ReactMarkerConstants
+ import com.facebook.react.bridge.UiThreadUtil
+ import com.facebook.react.common.SurfaceDelegateFactory
+ import com.facebook.react.common.annotations.internal.LegacyArchitecture
+-import com.facebook.react.common.annotations.internal.LegacyArchitectureLogLevel
+-import com.facebook.react.common.annotations.internal.LegacyArchitectureLogger.assertLegacyArchitecture
++// import com.facebook.react.common.annotations.internal.LegacyArchitectureLogLevel
++// import com.facebook.react.common.annotations.internal.LegacyArchitectureLogger.assertLegacyArchitecture
+ import com.facebook.react.devsupport.interfaces.DevBundleDownloadListener
+ import com.facebook.react.devsupport.interfaces.DevLoadingViewManager
+ import com.facebook.react.devsupport.interfaces.PausedInDebuggerOverlayManager
+@@ -82,14 +82,23 @@ open class NonFinalBridgeDevSupportManager(
+     pausedInDebuggerOverlayManager
+   ) {
+ 
++  override fun getUniqueTag(): String {
++    return "Bridge"
++  }
++
+   override val uniqueTag: String
+-    get() = "Bridge"
++    get() = getUniqueTag()
++
++  override fun loadSplitBundleFromServer(bundlePath: String, callback: com.facebook.react.devsupport.interfaces.DevSplitBundleCallback) {
++    // No-op implementation for compatibility
++    callback.onFailure(Exception("Split bundle loading not supported"))
++  }
+ 
+   override fun handleReloadJS() {
+     UiThreadUtil.assertOnUiThread()
+     ReactMarker.logMarker(
+       ReactMarkerConstants.RELOAD,
+-      devSettings.packagerConnectionSettings.debugServerHost
++      devSettings?.packagerConnectionSettings?.debugServerHost ?: ""
+     )
+ 
+     // dismiss redbox if exists
+@@ -101,9 +110,9 @@ open class NonFinalBridgeDevSupportManager(
+     }
+   }
+ 
+-  private companion object {
+-    init {
+-      assertLegacyArchitecture("BridgeDevSupportManager", LegacyArchitectureLogLevel.WARNING)
+-    }
+-  }
++  // private companion object {
++  //   init {
++  //     assertLegacyArchitecture("BridgeDevSupportManager", LegacyArchitectureLogLevel.WARNING)
++  //   }
++  // }
+ }
+diff --git a/node_modules/expo-dev-launcher/android/src/main/java/com/facebook/react/devsupport/NonFinalBridgelessDevSupportManager.kt b/node_modules/expo-dev-launcher/android/src/main/java/com/facebook/react/devsupport/NonFinalBridgelessDevSupportManager.kt
+index 834fdd7..aad5ac0 100644
+--- a/node_modules/expo-dev-launcher/android/src/main/java/com/facebook/react/devsupport/NonFinalBridgelessDevSupportManager.kt
++++ b/node_modules/expo-dev-launcher/android/src/main/java/com/facebook/react/devsupport/NonFinalBridgelessDevSupportManager.kt
+@@ -81,8 +81,17 @@ open class NonFinalBridgelessDevSupportManager(
+     pausedInDebuggerOverlayManager = null
+   )
+ 
++  override fun getUniqueTag(): String {
++    return "Bridgeless"
++  }
++
+   override val uniqueTag: String
+-    get() = "Bridgeless"
++    get() = getUniqueTag()
++
++  override fun loadSplitBundleFromServer(bundlePath: String, callback: com.facebook.react.devsupport.interfaces.DevSplitBundleCallback) {
++    // No-op implementation for compatibility
++    callback.onFailure(Exception("Split bundle loading not supported"))
++  }
+ 
+   override fun handleReloadJS() {
+     UiThreadUtil.assertOnUiThread()

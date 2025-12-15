@@ -927,7 +927,7 @@ const handleChooseDestination = async () => {
           } catch (initErr) {
             console.log('Could not initialize wallet:', initErr);
             // Fallback to getWallets
-            const wallets = await walletAPI.getWallets();
+      const wallets = await walletAPI.getWallets();
             wallet = Array.isArray(wallets) ? wallets[0] : wallets;
           }
         } else {
@@ -955,7 +955,7 @@ const handleChooseDestination = async () => {
         wallet = walletResponse?.data || walletResponse;
       } catch (walletErr: any) {
         // Fallback to getWallets
-        const wallets = await walletAPI.getWallets();
+      const wallets = await walletAPI.getWallets();
         wallet = Array.isArray(wallets) ? wallets[0] : wallets;
       }
       
