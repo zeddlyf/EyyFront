@@ -1,7 +1,7 @@
-import React, { useEffect, useState } from 'react';
-import { View, StyleSheet, Text, SafeAreaView, Platform, StatusBar, Image, TouchableOpacity, ScrollView } from 'react-native';
+import React, { useEffect, useState, useCallback } from 'react';
+import { View, StyleSheet, Text, SafeAreaView, Platform, StatusBar, Image, TouchableOpacity, ScrollView, AppState } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { Link, useRouter } from 'expo-router';
+import { Link, useRouter, useFocusEffect } from 'expo-router';
 import { walletAPI, paymentAPI } from '../../lib/api';
 
 export default function ProfileCommuter() {
@@ -14,46 +14,217 @@ export default function ProfileCommuter() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [depositing, setDepositing] = useState(false);
+  const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
 
-  useEffect(() => {
-    const fetchWalletAndTransactions = async () => {
-      setLoading(true);
-      setError(null);
-      try {
-        // Fetch wallets (assuming one wallet per user)
-        const wallets = await walletAPI.getWallets();
-        const wallet = Array.isArray(wallets) ? wallets[0] : wallets;
-        setBalance(wallet?.amount ?? 0); // Map amount to balance
-        setWalletId(wallet?._id ?? null);
-
-        // Fetch payments (transactions)
-        const payments = await paymentAPI.getPayments();
-        setTransactions(Array.isArray(payments) ? payments : []);
-      } catch (err: any) {
-        setError(err.message || 'Failed to load wallet info');
-      } finally {
-        setLoading(false);
+  // Helper function to fetch wallet and transactions
+  const fetchWalletAndTransactions = async () => {
+    setLoading(true);
+    setError(null);
+    
+    // Fetch wallet first (critical - show errors if this fails)
+    let wallet;
+    try {
+      const walletResponse = await walletAPI.getWallet();
+      wallet = walletResponse?.data || walletResponse;
+    } catch (walletErr: any) {
+      // If wallet doesn't exist, try to initialize it
+      if (walletErr?.response?.status === 404) {
+        try {
+          await walletAPI.initializeWallet();
+          const walletResponse = await walletAPI.getWallet();
+          wallet = walletResponse?.data || walletResponse;
+        } catch (initErr) {
+          console.log('Could not initialize wallet:', initErr);
+          // Fallback to getWallets if getWallet fails
+          try {
+            const wallets = await walletAPI.getWallets();
+            wallet = Array.isArray(wallets) ? wallets[0] : wallets;
+          } catch (fallbackErr) {
+            // If all wallet methods fail, show error
+            const errorMessage = walletErr?.response?.data?.message || walletErr?.message || 'Failed to load wallet';
+            setError(errorMessage);
+            setBalance(0);
+            setTransactions([]);
+            setLoading(false);
+            return;
+          }
+        }
+      } else {
+        // Fallback to getWallets if getWallet fails
+        try {
+          const wallets = await walletAPI.getWallets();
+          wallet = Array.isArray(wallets) ? wallets[0] : wallets;
+        } catch (fallbackErr) {
+          const errorMessage = walletErr?.response?.data?.message || walletErr?.message || 'Failed to load wallet';
+          setError(errorMessage);
+          setBalance(0);
+          setTransactions([]);
+          setLoading(false);
+          return;
+        }
       }
-    };
+    }
+
+    // Set wallet balance (critical - we have wallet now)
+    const walletBalance = wallet?.amount ?? wallet?.balance ?? 0;
+    const walletIdValue = wallet?._id ?? wallet?.id ?? null;
+    setBalance(walletBalance);
+    setWalletId(walletIdValue);
+
+    // Fetch transaction history (non-critical - don't show errors if this fails)
+    // Try multiple methods to get transaction history
+    let transactionsArray: any[] = [];
+    
+    // Method 1: Check if wallet object has transactions property
+    if (wallet?.transactions && Array.isArray(wallet.transactions)) {
+      transactionsArray = wallet.transactions;
+    } else if (wallet?.transactionHistory && Array.isArray(wallet.transactionHistory)) {
+      transactionsArray = wallet.transactionHistory;
+    } else {
+      // Method 2: Try wallet transaction history endpoint
+      try {
+        const transactionsResponse = await walletAPI.getTransactionHistory();
+        const transactionsData = transactionsResponse?.data || transactionsResponse;
+        // Handle both array and object with array property
+        transactionsArray = Array.isArray(transactionsData) 
+          ? transactionsData 
+          : (transactionsData?.transactions || transactionsData?.data || transactionsData?.history || []);
+      } catch (txErr: any) {
+        console.log('Wallet transaction history endpoint failed:', txErr?.message || txErr);
+        
+        // Method 3: Try to get transactions from wallet by ID if we have walletId
+        if (walletIdValue) {
+          try {
+            const walletById = await walletAPI.getWalletById(walletIdValue);
+            if (walletById?.transactions && Array.isArray(walletById.transactions)) {
+              transactionsArray = walletById.transactions;
+            } else if (walletById?.transactionHistory && Array.isArray(walletById.transactionHistory)) {
+              transactionsArray = walletById.transactionHistory;
+            }
+          } catch (walletByIdErr) {
+            console.log('Could not get wallet by ID:', walletByIdErr);
+          }
+        }
+        
+        // Method 4: Try payments API as fallback (only if wallet transactions fail)
+        if (transactionsArray.length === 0) {
+          try {
+            const payments = await paymentAPI.getPayments();
+            const paymentsArray = Array.isArray(payments) ? payments : (payments?.data || []);
+            // Filter payments related to this user/wallet
+            transactionsArray = paymentsArray.map((payment: any) => ({
+              ...payment,
+              type: payment.type || 'payment',
+              amount: payment.amount || payment.value || 0,
+              description: payment.description || 'Payment',
+              createdAt: payment.createdAt || payment.date || payment.timestamp
+            }));
+          } catch (paymentErr: any) {
+            console.log('Payments API also failed:', paymentErr?.message || paymentErr);
+            // Empty transaction history is fine - don't show error
+            transactionsArray = [];
+          }
+        }
+      }
+    }
+    
+    setTransactions(transactionsArray);
+    setLastRefresh(new Date());
+    setLoading(false);
+  };
+
+  // Initial load
+  useEffect(() => {
     fetchWalletAndTransactions();
   }, []);
 
-  // Deposit handler
+  // Refresh when screen comes into focus (e.g., returning from payment)
+  useFocusEffect(
+    useCallback(() => {
+      // Small delay to ensure webhook has processed
+      const timer = setTimeout(() => {
+        fetchWalletAndTransactions();
+      }, 1000);
+      
+      return () => clearTimeout(timer);
+    }, [])
+  );
+
+  // Also refresh when app comes to foreground (in case payment completed in background)
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (nextAppState) => {
+      if (nextAppState === 'active') {
+        // App has come to the foreground, refresh wallet
+        setTimeout(() => {
+          fetchWalletAndTransactions();
+        }, 1500);
+      }
+    });
+
+    return () => {
+      subscription?.remove();
+    };
+  }, []);
+
+  // Periodic refresh to catch new transactions (every 15 seconds when screen is active)
+  useEffect(() => {
+    const interval = setInterval(() => {
+      // Only refresh if not currently loading
+      if (!loading) {
+        fetchWalletAndTransactions();
+      }
+    }, 15000); // Refresh every 15 seconds
+
+    return () => clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading]);
+
+  // Deposit handler - redirects to topup flow with Xendit
   const handleDeposit = async () => {
-    if (!walletId || balance === null) return;
+    if (balance === null) return;
     setDepositing(true);
     setError(null);
     try {
-      await walletAPI.updateWallet(walletId, { amount: balance + 500 });
-      // Refresh wallet and transactions
-      const wallets = await walletAPI.getWallets();
-      const wallet = Array.isArray(wallets) ? wallets[0] : wallets;
-      setBalance(wallet?.amount ?? 0);
-      setWalletId(wallet?._id ?? null);
-      const payments = await paymentAPI.getPayments();
-      setTransactions(Array.isArray(payments) ? payments : []);
+      // topUp creates a Xendit payment URL - it doesn't directly add funds
+      // The funds are added via webhook after payment is completed
+      const topUpResponse = await walletAPI.topUp(500, 'EWALLET');
+      const topUpData = topUpResponse?.data || topUpResponse;
+      
+      // Check if we got a payment URL (Xendit flow)
+      if (topUpData?.paymentUrl || topUpData?.url) {
+        // Navigate to payment WebView to complete the payment
+        router.push({
+          pathname: '/PaymentWebView',
+          params: {
+            url: topUpData.paymentUrl || topUpData.url,
+            referenceId: topUpData.referenceId || topUpData.id || '',
+            amount: '500'
+          }
+        });
+        setDepositing(false);
+        return;
+      }
+      
+      // If no payment URL, check if funds were added directly (test mode)
+      if (topUpData?.success || topUpData?.amount) {
+        // Refresh wallet and transactions
+        await fetchWalletAndTransactions();
+        setDepositing(false);
+        return;
+      }
+      
+      // Fallback: Try addFunds endpoint for direct deposit (if available)
+      try {
+        await walletAPI.addFunds(500);
+        await fetchWalletAndTransactions();
+      } catch (addFundsErr: any) {
+        console.log('addFunds endpoint failed:', addFundsErr?.response?.status);
+        throw new Error('Could not initiate payment. Please try again.');
+      }
     } catch (err: any) {
-      setError(err.message || 'Failed to deposit');
+      console.error('Deposit error:', err);
+      const errorMessage = err?.response?.data?.message || err?.message || 'Failed to initiate deposit';
+      setError(errorMessage);
     } finally {
       setDepositing(false);
     }
@@ -230,28 +401,25 @@ export default function ProfileCommuter() {
         {/* Transaction History */}
         <View style={styles.transactionSection}>
           <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Transaction History</Text>
-            <TouchableOpacity style={styles.refreshButton} onPress={() => {
-              // Refresh transactions
-              const fetchWalletAndTransactions = async () => {
-                setLoading(true);
-                setError(null);
-                try {
-                  const wallets = await walletAPI.getWallets();
-                  const wallet = Array.isArray(wallets) ? wallets[0] : wallets;
-                  setBalance(wallet?.amount ?? 0);
-                  setWalletId(wallet?._id ?? null);
-                  const payments = await paymentAPI.getPayments();
-                  setTransactions(Array.isArray(payments) ? payments : []);
-                } catch (err: any) {
-                  setError(err.message || 'Failed to load wallet info');
-                } finally {
-                  setLoading(false);
-                }
-              };
-              fetchWalletAndTransactions();
-            }}>
-              <Ionicons name="refresh" size={20} color="#FFD700" />
+            <View style={{ flex: 1 }}>
+              <Text style={styles.sectionTitle}>Transaction History</Text>
+              {lastRefresh && (
+                <Text style={styles.lastUpdatedText}>
+                  Last updated: {lastRefresh.toLocaleTimeString()}
+                </Text>
+              )}
+            </View>
+            <TouchableOpacity 
+              style={styles.refreshButton} 
+              onPress={fetchWalletAndTransactions}
+              disabled={loading}
+            >
+              <Ionicons 
+                name={loading ? "reload" : "refresh"} 
+                size={20} 
+                color="#FFD700"
+                style={loading ? { transform: [{ rotate: '360deg' }] } : undefined}
+              />
             </TouchableOpacity>
           </View>
           
@@ -262,8 +430,19 @@ export default function ProfileCommuter() {
             </View>
           ) : error ? (
             <View style={styles.errorContainer}>
-              <Ionicons name="alert-circle" size={24} color="#ff6b6b" />
+              <Ionicons name="alert-circle" size={32} color="#ff6b6b" />
               <Text style={styles.errorText}>{error}</Text>
+              <Text style={styles.errorSubtext}>
+                {error.toLowerCase().includes('transaction') 
+                  ? 'Transaction history is not available, but your wallet balance is loaded.'
+                  : 'Please check your connection and try again.'}
+              </Text>
+              <TouchableOpacity 
+                style={styles.retryButton}
+                onPress={fetchWalletAndTransactions}
+              >
+                <Text style={styles.retryButtonText}>Retry</Text>
+              </TouchableOpacity>
             </View>
           ) : (
             <View style={styles.transactionList}>
@@ -274,55 +453,65 @@ export default function ProfileCommuter() {
                   <Text style={styles.emptySubtext}>Your transaction history will appear here</Text>
                 </View>
               ) : (
-                transactions.map((tx, idx) => (
-                  <View style={styles.transactionCard} key={tx._id || idx}>
-                    <View style={styles.transactionHeader}>
-                      <View style={styles.transactionIcon}>
-                        <Ionicons 
-                          name={getTransactionIcon(tx.type || tx.status)} 
-                          size={20} 
-                          color={getTransactionColor(tx.type || tx.status)} 
-                        />
-                      </View>
-                      <View style={styles.transactionInfo}>
-                        <Text style={styles.transactionTitle}>
-                          {getTransactionTitle(tx.description || tx.reference || tx.type || 'Payment')}
-                        </Text>
-                        <Text style={styles.transactionDate}>
-                          {tx.createdAt ? formatTransactionDate(tx.createdAt) : 'Unknown date'}
-                        </Text>
-                      </View>
-                      <View style={styles.transactionAmount}>
-                        <Text style={[
-                          styles.amount,
-                          { color: getAmountColor(tx.type || tx.status) }
-                        ]}>
-                          {tx.amount ? `${tx.amount > 0 ? '+' : ''}₱${tx.amount.toFixed(2)}` : '₱0.00'}
-                        </Text>
-                        <View style={[
-                          styles.statusBadge,
-                          { backgroundColor: getStatusColor(tx.status || 'success') }
-                        ]}>
-                          <Text style={styles.statusText}>
-                            {getStatusText(tx.status || 'success')}
+                transactions.map((tx, idx) => {
+                  // Handle different transaction data structures
+                  const transactionType = tx.type || tx.transactionType || tx.category || 'payment';
+                  const transactionStatus = tx.status || tx.transactionStatus || 'completed';
+                  const transactionAmount = tx.amount || tx.value || 0;
+                  const transactionDescription = tx.description || tx.note || tx.memo || tx.reference || 'Transaction';
+                  const transactionDate = tx.createdAt || tx.date || tx.timestamp || tx.created_at;
+                  const transactionId = tx._id || tx.id || `tx-${idx}`;
+                  
+                  return (
+                    <View style={styles.transactionCard} key={transactionId}>
+                      <View style={styles.transactionHeader}>
+                        <View style={styles.transactionIcon}>
+                          <Ionicons 
+                            name={getTransactionIcon(transactionType)} 
+                            size={20} 
+                            color={getTransactionColor(transactionType)} 
+                          />
+                        </View>
+                        <View style={styles.transactionInfo}>
+                          <Text style={styles.transactionTitle}>
+                            {getTransactionTitle(transactionDescription)}
+                          </Text>
+                          <Text style={styles.transactionDate}>
+                            {transactionDate ? formatTransactionDate(transactionDate) : 'Unknown date'}
                           </Text>
                         </View>
+                        <View style={styles.transactionAmount}>
+                          <Text style={[
+                            styles.amount,
+                            { color: getAmountColor(transactionType) }
+                          ]}>
+                            {transactionAmount ? `${transactionAmount > 0 ? '+' : ''}₱${Math.abs(transactionAmount).toFixed(2)}` : '₱0.00'}
+                          </Text>
+                          <View style={[
+                            styles.statusBadge,
+                            { backgroundColor: getStatusColor(transactionStatus) }
+                          ]}>
+                            <Text style={styles.statusText}>
+                              {getStatusText(transactionStatus)}
+                            </Text>
+                          </View>
+                        </View>
                       </View>
+                      
+                      {transactionDescription && transactionDescription !== tx.reference && (
+                        <Text style={styles.transactionDescription}>
+                          {transactionDescription}
+                        </Text>
+                      )}
+                      
+                      {(tx.reference || tx.referenceNumber || tx.transactionId) && (
+                        <Text style={styles.transactionReference}>
+                          Ref: {tx.reference || tx.referenceNumber || tx.transactionId}
+                        </Text>
+                      )}
                     </View>
-                    
-                    {tx.description && tx.description !== tx.reference && (
-                      <Text style={styles.transactionDescription}>
-                        {tx.description}
-                      </Text>
-                    )}
-                    
-                    {tx.reference && (
-                      <Text style={styles.transactionReference}>
-                        Ref: {tx.reference}
-                      </Text>
-                    )}
-                  </View>
-                ))
+                  );
+                })
               )}
             </View>
           )}
@@ -416,6 +605,11 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: 'bold',
   },
+  lastUpdatedText: {
+    color: '#ffffff60',
+    fontSize: 11,
+    marginTop: 4,
+  },
   refreshButton: {
     padding: 8,
   },
@@ -440,6 +634,26 @@ const styles = StyleSheet.create({
     fontSize: 16,
     marginTop: 8,
     textAlign: 'center',
+    marginBottom: 8,
+  },
+  errorSubtext: {
+    color: '#ffffff80',
+    fontSize: 14,
+    textAlign: 'center',
+    marginBottom: 16,
+    paddingHorizontal: 20,
+  },
+  retryButton: {
+    backgroundColor: '#FFD700',
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 8,
+    marginTop: 8,
+  },
+  retryButtonText: {
+    color: '#0d4217',
+    fontSize: 16,
+    fontWeight: 'bold',
   },
   emptyContainer: {
     alignItems: 'center',

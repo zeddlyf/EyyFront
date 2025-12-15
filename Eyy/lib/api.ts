@@ -186,6 +186,23 @@ const authAPI = {
       throw new Error('Failed to get user profile');
     }
   },
+
+  requestPasswordReset: async (identifier: string) => {
+    const payload = identifier.includes('@') ? { email: identifier } : { phoneNumber: identifier };
+    const response = await api.post('/api/auth/password/request', payload);
+    return response.data;
+  },
+
+  verifyPasswordOtp: async (identifier: string, otp: string) => {
+    const payload = identifier.includes('@') ? { email: identifier, otp } : { phoneNumber: identifier, otp };
+    const response = await api.post('/api/auth/password/verify', payload);
+    return response.data;
+  },
+
+  resetPassword: async (resetToken: string, newPassword: string) => {
+    const response = await api.post('/api/auth/password/reset', { resetToken, newPassword });
+    return response.data;
+  },
 };
 
 // User API endpoints

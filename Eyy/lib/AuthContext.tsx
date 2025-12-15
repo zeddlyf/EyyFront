@@ -9,6 +9,7 @@ interface AuthContextType {
   register: (userData: any) => Promise<void>;
   logout: () => Promise<void>;
   updateUser: (userData: any) => void;
+  refreshUser: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -69,8 +70,30 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     });
   };
 
+  const refreshUser = async () => {
+    try {
+      // Reload user from storage
+      await loadUser();
+      
+      // Optionally, fetch fresh user data from API if available
+      try {
+        const currentUser = await AsyncStorage.getItem('user');
+        if (currentUser) {
+          const userData = JSON.parse(currentUser);
+          // You can add API call here to get fresh user data if needed
+          // const freshUserData = await authAPI.getCurrentUser();
+          // setUser(freshUserData);
+        }
+      } catch (err) {
+        console.log('Could not refresh user from API:', err);
+      }
+    } catch (error) {
+      console.error('Error refreshing user:', error);
+    }
+  };
+
   return (
-    <AuthContext.Provider value={{ user, loading, login, register, logout, updateUser }}>
+    <AuthContext.Provider value={{ user, loading, login, register, logout, updateUser, refreshUser }}>
       {children}
     </AuthContext.Provider>
   );

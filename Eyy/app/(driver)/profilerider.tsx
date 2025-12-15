@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from 'react';
-import { View, StyleSheet, Text, SafeAreaView, Platform, StatusBar, Image, TouchableOpacity, ScrollView, ActivityIndicator, Alert } from 'react-native';
+import { View, StyleSheet, Text, SafeAreaView, Platform, StatusBar, Image, TouchableOpacity, ScrollView, ActivityIndicator, Alert, Modal, TextInput } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import { rideAPI, userAPI, authAPI } from '../../lib/api';
+import { rideAPI, userAPI, authAPI, walletAPI } from '../../lib/api';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 interface DriverStats {
@@ -35,6 +35,13 @@ export default function ProfileRider() {
     totalRides: 0,
   });
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
+  const [showWithdrawalModal, setShowWithdrawalModal] = useState(false);
+  const [withdrawalAmount, setWithdrawalAmount] = useState('');
+  const [bankCode, setBankCode] = useState('');
+  const [accountNumber, setAccountNumber] = useState('');
+  const [accountHolderName, setAccountHolderName] = useState('');
+  const [withdrawing, setWithdrawing] = useState(false);
+  const [availableBalance, setAvailableBalance] = useState(0);
 
   const fetchDriverData = async () => {
     try {
@@ -65,6 +72,22 @@ export default function ProfileRider() {
         totalRides: rides.length,
       });
 
+      // Fetch available balance for withdrawal (from wallet if exists)
+      try {
+        const walletResponse = await walletAPI.getWallet();
+        const wallet = walletResponse?.data || walletResponse;
+        if (wallet && (wallet.amount !== undefined || wallet.balance !== undefined)) {
+          setAvailableBalance(wallet.amount || wallet.balance || 0);
+        } else {
+          // If no wallet, use total earnings as available balance
+          setAvailableBalance(totalEarnings);
+        }
+      } catch (walletErr: any) {
+        // If wallet doesn't exist, use total earnings
+        console.log('Wallet not found, using total earnings:', walletErr);
+        setAvailableBalance(totalEarnings);
+      }
+
     } catch (err: any) {
       if (err.message && err.message.toLowerCase().includes('authenticate')) {
         Alert.alert('Session expired', 'Please log in again.');
@@ -89,6 +112,88 @@ export default function ProfileRider() {
 
   const formatCurrency = (amount: number) => {
     return `₱${amount.toFixed(2)}`;
+  };
+
+  const handleCashOut = () => {
+    if (availableBalance <= 0) {
+      Alert.alert('No Balance', 'You have no available balance to withdraw.');
+      return;
+    }
+    setShowWithdrawalModal(true);
+  };
+
+  const handleWithdrawalSubmit = async () => {
+    const amount = parseFloat(withdrawalAmount);
+    
+    // Validation
+    if (!amount || amount <= 0) {
+      Alert.alert('Invalid Amount', 'Please enter a valid withdrawal amount.');
+      return;
+    }
+
+    if (amount > availableBalance) {
+      Alert.alert('Insufficient Balance', `You can only withdraw up to ${formatCurrency(availableBalance)}.`);
+      return;
+    }
+
+    if (!bankCode || !accountNumber || !accountHolderName) {
+      Alert.alert('Missing Information', 'Please fill in all bank details.');
+      return;
+    }
+
+    // Minimum withdrawal amount
+    if (amount < 100) {
+      Alert.alert('Minimum Amount', 'Minimum withdrawal amount is ₱100.00.');
+      return;
+    }
+
+    try {
+      setWithdrawing(true);
+      
+      const response = await walletAPI.cashOut({
+        amount,
+        bankCode,
+        accountNumber,
+        accountHolderName,
+      });
+
+      Alert.alert(
+        'Withdrawal Request Submitted',
+        `Your withdrawal request of ${formatCurrency(amount)} has been submitted successfully. It will be processed within 1-3 business days.`,
+        [
+          {
+            text: 'OK',
+            onPress: () => {
+              setShowWithdrawalModal(false);
+              resetWithdrawalForm();
+              fetchDriverData(); // Refresh data
+            }
+          }
+        ]
+      );
+    } catch (error: any) {
+      console.error('Withdrawal error:', error);
+      Alert.alert(
+        'Withdrawal Failed',
+        error.message || 'Failed to process withdrawal request. Please try again.'
+      );
+    } finally {
+      setWithdrawing(false);
+    }
+  };
+
+  const resetWithdrawalForm = () => {
+    setWithdrawalAmount('');
+    setBankCode('');
+    setAccountNumber('');
+    setAccountHolderName('');
+  };
+
+  const handleCloseModal = () => {
+    if (!withdrawing) {
+      setShowWithdrawalModal(false);
+      resetWithdrawalForm();
+    }
   };
 
   useEffect(() => {
@@ -248,6 +353,22 @@ export default function ProfileRider() {
                   <Text style={styles.actionButtonText}>Go Online</Text>
                 </TouchableOpacity>
               </View>
+              
+              {/* Cash Out Button */}
+              <TouchableOpacity 
+                style={[styles.cashOutButton, availableBalance <= 0 && styles.cashOutButtonDisabled]}
+                onPress={handleCashOut}
+                disabled={availableBalance <= 0}
+              >
+                <Ionicons name="cash-outline" size={24} color="#fff" />
+                <View style={styles.cashOutButtonContent}>
+                  <Text style={styles.cashOutButtonText}>Cash Out Earnings</Text>
+                  <Text style={styles.cashOutButtonSubtext}>
+                    Available: {formatCurrency(availableBalance)}
+                  </Text>
+                </View>
+                <Ionicons name="chevron-forward" size={20} color="#fff" />
+              </TouchableOpacity>
             </View>
 
             {/* Logout Button */}
@@ -260,6 +381,124 @@ export default function ProfileRider() {
           </>
         )}
       </ScrollView>
+
+      {/* Withdrawal Modal */}
+      <Modal
+        visible={showWithdrawalModal}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={handleCloseModal}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Cash Out Earnings</Text>
+              <TouchableOpacity onPress={handleCloseModal} disabled={withdrawing}>
+                <Ionicons name="close" size={24} color="#fff" />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView style={styles.modalBody} showsVerticalScrollIndicator={false}>
+              {/* Available Balance */}
+              <View style={styles.balanceInfo}>
+                <Text style={styles.balanceLabel}>Available Balance</Text>
+                <Text style={styles.balanceAmount}>{formatCurrency(availableBalance)}</Text>
+              </View>
+
+              {/* Amount Input */}
+              <View style={styles.inputGroup}>
+                <Text style={styles.inputLabel}>Withdrawal Amount</Text>
+                <View style={styles.amountInputContainer}>
+                  <Text style={styles.currencySymbol}>₱</Text>
+                  <TextInput
+                    style={styles.amountInput}
+                    placeholder="0.00"
+                    placeholderTextColor="#999"
+                    value={withdrawalAmount}
+                    onChangeText={setWithdrawalAmount}
+                    keyboardType="decimal-pad"
+                    editable={!withdrawing}
+                  />
+                </View>
+                <Text style={styles.inputHint}>Minimum: ₱100.00</Text>
+              </View>
+
+              {/* Bank Code */}
+              <View style={styles.inputGroup}>
+                <Text style={styles.inputLabel}>Bank</Text>
+                <TextInput
+                  style={styles.input}
+                  placeholder="e.g., BPI, BDO, GCASH, PAYMAYA"
+                  placeholderTextColor="#999"
+                  value={bankCode}
+                  onChangeText={setBankCode}
+                  editable={!withdrawing}
+                />
+              </View>
+
+              {/* Account Number */}
+              <View style={styles.inputGroup}>
+                <Text style={styles.inputLabel}>Account Number</Text>
+                <TextInput
+                  style={styles.input}
+                  placeholder="Enter your account number"
+                  placeholderTextColor="#999"
+                  value={accountNumber}
+                  onChangeText={setAccountNumber}
+                  keyboardType="numeric"
+                  editable={!withdrawing}
+                />
+              </View>
+
+              {/* Account Holder Name */}
+              <View style={styles.inputGroup}>
+                <Text style={styles.inputLabel}>Account Holder Name</Text>
+                <TextInput
+                  style={styles.input}
+                  placeholder="Enter account holder name"
+                  placeholderTextColor="#999"
+                  value={accountHolderName}
+                  onChangeText={setAccountHolderName}
+                  editable={!withdrawing}
+                />
+              </View>
+
+              {/* Info Note */}
+              <View style={styles.infoNote}>
+                <Ionicons name="information-circle-outline" size={20} color="#FFD700" />
+                <Text style={styles.infoNoteText}>
+                  Withdrawal requests are processed within 1-3 business days. Please ensure your bank details are correct.
+                </Text>
+              </View>
+            </ScrollView>
+
+            {/* Modal Footer */}
+            <View style={styles.modalFooter}>
+              <TouchableOpacity
+                style={[styles.modalButton, styles.cancelButton]}
+                onPress={handleCloseModal}
+                disabled={withdrawing}
+              >
+                <Text style={styles.cancelButtonText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.modalButton, styles.submitButton, withdrawing && styles.submitButtonDisabled]}
+                onPress={handleWithdrawalSubmit}
+                disabled={withdrawing}
+              >
+                {withdrawing ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <>
+                    <Ionicons name="checkmark-circle" size={20} color="#fff" />
+                    <Text style={styles.submitButtonText}>Submit Request</Text>
+                  </>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -459,5 +698,173 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     fontSize: 16,
     marginLeft: 8,
+  },
+  cashOutButton: {
+    backgroundColor: '#FFD700',
+    borderRadius: 8,
+    padding: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 12,
+    justifyContent: 'space-between',
+  },
+  cashOutButtonDisabled: {
+    backgroundColor: '#555',
+    opacity: 0.6,
+  },
+  cashOutButtonContent: {
+    flex: 1,
+    marginLeft: 12,
+  },
+  cashOutButtonText: {
+    color: '#0d4217',
+    fontWeight: 'bold',
+    fontSize: 16,
+  },
+  cashOutButtonSubtext: {
+    color: '#0d4217',
+    fontSize: 12,
+    marginTop: 2,
+    opacity: 0.8,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    justifyContent: 'flex-end',
+  },
+  modalContent: {
+    backgroundColor: '#083010',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    maxHeight: '90%',
+    paddingBottom: Platform.OS === 'ios' ? 20 : 0,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: '#0d4217',
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#FFD700',
+  },
+  modalBody: {
+    padding: 20,
+    maxHeight: 500,
+  },
+  balanceInfo: {
+    backgroundColor: '#0d4217',
+    borderRadius: 12,
+    padding: 20,
+    alignItems: 'center',
+    marginBottom: 24,
+  },
+  balanceLabel: {
+    fontSize: 14,
+    color: '#FFD700',
+    marginBottom: 8,
+  },
+  balanceAmount: {
+    fontSize: 32,
+    fontWeight: 'bold',
+    color: '#fff',
+  },
+  inputGroup: {
+    marginBottom: 20,
+  },
+  inputLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#FFD700',
+    marginBottom: 8,
+  },
+  input: {
+    backgroundColor: '#0d4217',
+    borderRadius: 8,
+    padding: 14,
+    color: '#fff',
+    fontSize: 16,
+    borderWidth: 1,
+    borderColor: '#1a5a2a',
+  },
+  amountInputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#0d4217',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#1a5a2a',
+    paddingHorizontal: 14,
+  },
+  currencySymbol: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#FFD700',
+    marginRight: 8,
+  },
+  amountInput: {
+    flex: 1,
+    padding: 14,
+    color: '#fff',
+    fontSize: 24,
+    fontWeight: 'bold',
+  },
+  inputHint: {
+    fontSize: 12,
+    color: '#999',
+    marginTop: 4,
+  },
+  infoNote: {
+    flexDirection: 'row',
+    backgroundColor: '#0d4217',
+    borderRadius: 8,
+    padding: 12,
+    marginTop: 8,
+  },
+  infoNoteText: {
+    flex: 1,
+    fontSize: 12,
+    color: '#ccc',
+    marginLeft: 8,
+    lineHeight: 18,
+  },
+  modalFooter: {
+    flexDirection: 'row',
+    padding: 20,
+    borderTopWidth: 1,
+    borderTopColor: '#0d4217',
+    gap: 12,
+  },
+  modalButton: {
+    flex: 1,
+    padding: 16,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+    gap: 8,
+  },
+  cancelButton: {
+    backgroundColor: '#333',
+  },
+  cancelButtonText: {
+    color: '#fff',
+    fontWeight: 'bold',
+    fontSize: 16,
+  },
+  submitButton: {
+    backgroundColor: '#FFD700',
+  },
+  submitButtonDisabled: {
+    opacity: 0.6,
+  },
+  submitButtonText: {
+    color: '#0d4217',
+    fontWeight: 'bold',
+    fontSize: 16,
   },
 }); 

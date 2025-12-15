@@ -1,7 +1,7 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { View, StyleSheet, Text, SafeAreaView, Platform, StatusBar, TouchableOpacity, TextInput, Alert, ActivityIndicator, ScrollView } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { Link, useRouter, useLocalSearchParams } from 'expo-router';
+import { Link, useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import MapView, { Marker, PROVIDER_GOOGLE, Polyline, PROVIDER_DEFAULT, MapType } from 'react-native-maps';
 import * as Location from 'expo-location';
 import { PathFinder, Point } from '../../utils/pathfinding';
@@ -554,6 +554,14 @@ const handleChooseDestination = async () => {
     };
   }, []);
 
+  // Refresh wallet balance when screen comes into focus (e.g., returning from topup)
+  useFocusEffect(
+    useCallback(() => {
+      // Refresh wallet balance when screen is focused
+      fetchWalletBalance();
+    }, [])
+  );
+
 
   // Add cache cleaning on component mount
   useEffect(() => {
@@ -904,37 +912,75 @@ const handleChooseDestination = async () => {
 
   const fetchWalletBalance = async () => {
     try {
-      const wallets = await walletAPI.getWallets();
-      const wallet = Array.isArray(wallets) ? wallets[0] : wallets;
-      setWalletBalance(wallet?.amount ?? 0);
-    } catch (error) {
+      // Try user-specific wallet endpoint first
+      let wallet;
+      try {
+        const walletResponse = await walletAPI.getWallet();
+        wallet = walletResponse?.data || walletResponse;
+      } catch (walletErr: any) {
+        // If wallet doesn't exist, try to initialize it
+        if (walletErr?.response?.status === 404) {
+          try {
+            await walletAPI.initializeWallet();
+            const walletResponse = await walletAPI.getWallet();
+            wallet = walletResponse?.data || walletResponse;
+          } catch (initErr) {
+            console.log('Could not initialize wallet:', initErr);
+            // Fallback to getWallets
+            const wallets = await walletAPI.getWallets();
+            wallet = Array.isArray(wallets) ? wallets[0] : wallets;
+          }
+        } else {
+          // Fallback to getWallets if getWallet fails
+          const wallets = await walletAPI.getWallets();
+          wallet = Array.isArray(wallets) ? wallets[0] : wallets;
+        }
+      }
+      
+      const balance = wallet?.amount ?? wallet?.balance ?? 0;
+      setWalletBalance(balance);
+    } catch (error: any) {
       console.error('Error fetching wallet balance:', error);
+      // Set to 0 on error so booking can still proceed (backend will validate)
       setWalletBalance(0);
     }
   };
 
   const deductFareFromWallet = async (fare: number) => {
     try {
-      const wallets = await walletAPI.getWallets();
-      const wallet = Array.isArray(wallets) ? wallets[0] : wallets;
+      // Get current wallet
+      let wallet;
+      try {
+        const walletResponse = await walletAPI.getWallet();
+        wallet = walletResponse?.data || walletResponse;
+      } catch (walletErr: any) {
+        // Fallback to getWallets
+        const wallets = await walletAPI.getWallets();
+        wallet = Array.isArray(wallets) ? wallets[0] : wallets;
+      }
       
-      if (!wallet || !wallet._id) {
+      if (!wallet) {
         throw new Error('Wallet not found');
       }
 
-      const currentBalance = wallet.amount || 0;
+      const walletId = wallet._id || wallet.id;
+      if (!walletId) {
+        throw new Error('Wallet ID not found');
+      }
+
+      const currentBalance = wallet.amount || wallet.balance || 0;
       if (currentBalance < fare) {
         throw new Error('Insufficient wallet balance');
       }
 
       const newBalance = currentBalance - fare;
-      await walletAPI.updateWallet(wallet._id, { amount: newBalance });
+      await walletAPI.updateWallet(walletId, { amount: newBalance });
       
       // Update local state
       setWalletBalance(newBalance);
       
       console.log(`Fare of ₱${fare.toFixed(2)} deducted from wallet. New balance: ₱${newBalance.toFixed(2)}`);
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error deducting fare from wallet:', error);
       throw error;
     }
